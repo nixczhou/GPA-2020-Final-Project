@@ -73,6 +73,87 @@ struct Material {
 vector<Material> vertex_material;
 vector<Shape> vertex_shape;
 
+/*-----------------------------------------------Skybox part-----------------------------------------------*/
+vector<string> faces = { "cubemaps\\face-r.jpg", "cubemaps\\face-l.jpg", "cubemaps\\face-t.jpg", "cubemaps\\face-d.jpg", "cubemaps\\face-b.jpg", "cubemaps\\face-f.jpg" };
+
+GLuint skybox;
+GLuint cubemapTexture;
+GLuint skyboxVAO;
+
+void skyboxInitFunction()
+{
+	skybox = glCreateProgram();
+
+	GLuint skybox_vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	GLuint skybox_fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+	char** skybox_vertexShaderSource = loadShaderSource("skybox.vs.glsl");
+	char** skybox_fragmentShaderSource = loadShaderSource("skybox.fs.glsl");
+
+	glShaderSource(skybox_vertexShader, 1, skybox_vertexShaderSource, NULL);
+	glShaderSource(skybox_fragmentShader, 1, skybox_fragmentShaderSource, NULL);
+
+	freeShaderSource(skybox_vertexShaderSource);
+	freeShaderSource(skybox_fragmentShaderSource);
+
+	glCompileShader(skybox_vertexShader);
+	glCompileShader(skybox_fragmentShader);
+
+	shaderLog(skybox_vertexShader);
+	shaderLog(skybox_fragmentShader);
+
+	glAttachShader(skybox, skybox_vertexShader);
+	glAttachShader(skybox, skybox_fragmentShader);
+	glLinkProgram(skybox);
+	glUseProgram(skybox);
+
+	//load skybox Texture
+	glGenTextures(1, &cubemapTexture);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+	for (int i = 0; i < 6; i++)
+	{
+		texture_data envmap_data = loadImg(faces[i].c_str());
+		glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, envmap_data.width, envmap_data.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, envmap_data.data);
+	}
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
+	glGenVertexArrays(1, &skyboxVAO);
+}
+
+void SkyboxRendering()
+{
+	static const GLfloat gray[] = { 0.2f, 0.2f, 0.2f, 1.0f };
+	static const GLfloat ones[] = { 1.0f };
+
+	mat4 mv_matrix = view;
+	//cout << mv_matrix[0][0] << endl << mv_matrix[1][0] << endl;
+
+	mat4 inv_vp_matrix = inverse(projection * view);
+	//cout << inv_vp_matrix[0][0] << endl << inv_vp_matrix[1][0] << endl;
+
+	glClearBufferfv(GL_COLOR, 0, gray);
+	glClearBufferfv(GL_DEPTH, 0, ones);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+	glUniform1i(glGetUniformLocation(skybox, "tex_cubemap"), 0);
+
+	glUseProgram(skybox);
+	glBindVertexArray(skyboxVAO);
+	glUniformMatrix4fv(glGetUniformLocation(skybox, "inv_vp_matrix"), 1, GL_FALSE, &inv_vp_matrix[0][0]);
+	glUniform3fv(glGetUniformLocation(skybox, "eye"), 1, &cameraPos[0]);
+
+	glDisable(GL_DEPTH_TEST);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glEnable(GL_DEPTH_TEST);
+}
+/*-----------------------------------------------Skybox part-----------------------------------------------*/
+
 void loadScene() {
 	//Importer
 	const aiScene *scene = aiImportFile("sponza.obj", aiProcessPreset_TargetRealtime_MaxQuality);
@@ -212,7 +293,7 @@ void renderScene() {
 
 	// Clear the framebuffer with white
 	static const GLfloat white[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-	glClearBufferfv(GL_COLOR, 0, white);
+	//glClearBufferfv(GL_COLOR, 0, white);
 
 	// Adjust Camera Parameters
 	view = lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
@@ -256,11 +337,14 @@ void My_Init()
 	glDepthFunc(GL_LEQUAL);
 
 	initScene();
+	skyboxInitFunction();
 }
 
 void My_Display()
 {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	SkyboxRendering();
 
 	renderScene();
 
