@@ -1,0 +1,9 @@
+﻿  main.cpp
+d:\nico-course\graphics\final-project\as2_framework\source\main.cpp(16): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  c:\program files (x86)\windows kits\10\include\10.0.17763.0\ucrt\stdio.h(208): note: see declaration of 'fopen'
+d:\nico-course\graphics\final-project\as2_framework\source\main.cpp(231): warning C4018: '<': signed/unsigned mismatch
+d:\nico-course\graphics\final-project\as2_framework\source\main.cpp(298): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
+d:\nico-course\graphics\final-project\as2_framework\source\main.cpp(299): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
+d:\nico-course\graphics\final-project\as2_framework\source\main.cpp(306): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
+d:\nico-course\graphics\final-project\as2_framework\source\main.cpp(307): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
+  AS2_Framework.vcxproj -> D:\nico-course\graphics\final-project\AS2_Framework\VC14\Debug\AS2_Framework.exe
