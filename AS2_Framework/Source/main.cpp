@@ -31,6 +31,48 @@ void freeShaderSource(char** srcp)
     delete[] srcp;
 }
 
+//-----------------Begin Load Scene Function and Variables---------------------
+GLuint scene_program;
+GLint um4mv, um4p;
+GLint tex_mode;
+GLuint texture_location;
+int texture_mode = 0;
+
+mat4 view;					// V of MVP, viewing matrix
+mat4 projection;			// P of MVP, projection matrix
+mat4 model;					// M of MVP, model matrix
+mat4 ModelView;
+float viewportAspect;
+mat4 scaleOne, M;
+
+vec3 cameraPos = vec3(-300.0f, 20.0f, -30.0f);
+vec3 cameraFront = vec3(-15.0f, 0.0f, 0.0f);
+vec3 cameraUp = vec3(0.0f, 1.0f, 0.0f);
+
+//Initialize Variable For Mouse Control
+vec3 cameraSpeed = vec3(10.0f, 10.0f, 10.0f);
+float yaws = -90.0;
+float pitchs = 0.0;
+bool firstMouse = true;
+float lastX = 300, lastY = 300;
+
+struct Shape {
+	GLuint vao;
+	GLuint vbo_position;
+	GLuint vbo_normal;
+	GLuint vbo_texcoord;
+	GLuint ibo;
+	int drawCount;
+	int materialID;
+};
+
+struct Material {
+	GLuint diffuse_tex;
+};
+
+vector<Material> vertex_material;
+vector<Shape> vertex_shape;
+
 /*-----------------------------------------------Skybox part-----------------------------------------------*/
 vector<string> faces = { "cubemaps\\face-r.jpg", "cubemaps\\face-l.jpg", "cubemaps\\face-t.jpg", "cubemaps\\face-d.jpg", "cubemaps\\face-b.jpg", "cubemaps\\face-f.jpg" };
 
@@ -89,7 +131,10 @@ void SkyboxRendering()
 	static const GLfloat ones[] = { 1.0f };
 
 	mat4 mv_matrix = view;
+	//cout << mv_matrix[0][0] << endl << mv_matrix[1][0] << endl;
+
 	mat4 inv_vp_matrix = inverse(projection * view);
+	//cout << inv_vp_matrix[0][0] << endl << inv_vp_matrix[1][0] << endl;
 
 	glClearBufferfv(GL_COLOR, 0, gray);
 	glClearBufferfv(GL_DEPTH, 0, ones);
@@ -108,48 +153,6 @@ void SkyboxRendering()
 	glEnable(GL_DEPTH_TEST);
 }
 /*-----------------------------------------------Skybox part-----------------------------------------------*/
-
-//-----------------Begin Load Scene Function and Variables---------------------
-GLuint scene_program;
-GLint um4mv, um4p;
-GLint tex_mode;
-GLuint texture_location;
-int texture_mode = 0;
-
-mat4 view;					// V of MVP, viewing matrix
-mat4 projection;			// P of MVP, projection matrix
-mat4 model;					// M of MVP, model matrix
-mat4 ModelView;
-float viewportAspect;
-mat4 scaleOne, M;
-
-vec3 cameraPos = vec3(-300.0f, 20.0f, -30.0f);
-vec3 cameraFront = vec3(-15.0f, 0.0f, 0.0f);
-vec3 cameraUp = vec3(0.0f, 1.0f, 0.0f);
-
-//Initialize Variable For Mouse Control
-vec3 cameraSpeed = vec3(10.0f, 10.0f, 10.0f);
-float yaws = -90.0;
-float pitchs = 0.0;
-bool firstMouse = true;
-float lastX = 300, lastY = 300;
-
-struct Shape {
-	GLuint vao;
-	GLuint vbo_position;
-	GLuint vbo_normal;
-	GLuint vbo_texcoord;
-	GLuint ibo;
-	int drawCount;
-	int materialID;
-};
-
-struct Material {
-	GLuint diffuse_tex;
-};
-
-vector<Material> vertex_material;
-vector<Shape> vertex_shape;
 
 void loadScene() {
 	//Importer
@@ -290,7 +293,7 @@ void renderScene() {
 
 	// Clear the framebuffer with white
 	static const GLfloat white[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-	glClearBufferfv(GL_COLOR, 0, white);
+	//glClearBufferfv(GL_COLOR, 0, white);
 
 	// Adjust Camera Parameters
 	view = lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
@@ -334,11 +337,14 @@ void My_Init()
 	glDepthFunc(GL_LEQUAL);
 
 	initScene();
+	skyboxInitFunction();
 }
 
 void My_Display()
 {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	SkyboxRendering();
 
 	renderScene();
 
