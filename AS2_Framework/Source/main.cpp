@@ -44,6 +44,7 @@ mat4 model;					// M of MVP, model matrix
 mat4 ModelView;
 float viewportAspect;
 mat4 scaleOne, M;
+mat4 model_matrix;
 
 vec3 cameraPos = vec3(-300.0f, 20.0f, -30.0f);
 vec3 cameraFront = vec3(-15.0f, 0.0f, 0.0f);
@@ -58,6 +59,7 @@ float lastX = 300, lastY = 300;
 
 struct Shape {
 	GLuint vao;
+	GLuint vbo;
 	GLuint vbo_position;
 	GLuint vbo_normal;
 	GLuint vbo_texcoord;
@@ -72,6 +74,291 @@ struct Material {
 
 vector<Material> vertex_material;
 vector<Shape> vertex_shape;
+
+Shape m_shape;
+
+
+GLuint model_program;
+GLuint tex_toon;
+
+struct
+{
+	struct
+	{
+		GLint mv_matrix;
+		GLint proj_matrix;
+	} toon;
+} uniforms;
+
+
+void loadScene() {
+	//Importer
+	const aiScene *scene = aiImportFile("sponza.obj", aiProcessPreset_TargetRealtime_MaxQuality);
+
+	//Materials
+	for (unsigned int i = 0; i < scene->mNumMaterials; i++)
+	{
+		aiMaterial *material = scene->mMaterials[i];
+		Material materials;
+		aiString texturePath;
+		texture_data texture;
+		if (material->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath) == aiReturn_SUCCESS)
+		{
+			// load width, height and data from texturePath.C_Str();
+			texture = loadImg(texturePath.C_Str());
+			glGenTextures(1, &materials.diffuse_tex);
+			glBindTexture(GL_TEXTURE_2D, materials.diffuse_tex);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, texture.width, texture.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture.data);
+			glGenerateMipmap(GL_TEXTURE_2D);
+		}
+		else {
+			// load some default image as default_diffuse_tex
+
+		}
+		vertex_material.push_back(materials);
+	}
+
+	//Geometry
+	for (unsigned int i = 0; i < scene->mNumMeshes; i++)
+	{
+		aiMesh *mesh = scene->mMeshes[i];
+		Shape shape;
+		glGenVertexArrays(1, &shape.vao);
+		glBindVertexArray(shape.vao);
+
+		// create 3 vbos to hold data
+		glGenBuffers(1, &shape.vbo_position);
+		glGenBuffers(1, &shape.vbo_normal);
+		glGenBuffers(1, &shape.vbo_texcoord);
+
+		float* position = new float[mesh->mNumVertices * 3];
+		float* normal = new float[mesh->mNumVertices * 3];
+		float* texcoord = new float[mesh->mNumVertices * 3];
+		unsigned int* index = new unsigned int[mesh->mNumFaces * 3];
+		int index_po, index_nor, index_tex, index_ibo;
+
+		index_po = index_nor = index_tex = 0;
+		for (unsigned int v = 0; v < mesh->mNumVertices; v++)
+		{
+			for (int i = 0; i < 3; i++) {
+				*(position + index_po++) = mesh->mVertices[v][i];
+				*(normal + index_nor++) = mesh->mNormals[v][i];
+			}
+
+			for (int i = 0; i < 2; i++)
+				*(texcoord + index_tex++) = mesh->mTextureCoords[0][v][i];
+		}
+		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_position);
+		glBufferData(GL_ARRAY_BUFFER, mesh->mNumVertices * 3 * sizeof(float), position, GL_STATIC_DRAW);
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+
+		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_texcoord);
+		glBufferData(GL_ARRAY_BUFFER, mesh->mNumVertices * 2 * sizeof(float), texcoord, GL_STATIC_DRAW);
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, NULL);
+
+		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_normal);
+		glBufferData(GL_ARRAY_BUFFER, mesh->mNumVertices * 3 * sizeof(float), normal, GL_STATIC_DRAW);
+		glEnableVertexAttribArray(2);
+		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+
+		// create 1 ibo to hold data
+		glGenBuffers(1, &shape.ibo);
+		index_ibo = 0;
+		for (unsigned int f = 0; f < mesh->mNumFaces; f++)
+		{
+			for (int i = 0; i < 3; i++)
+				index[index_ibo++] = mesh->mFaces[f].mIndices[i];
+		}
+
+		glBindBuffer(GL_ARRAY_BUFFER, shape.ibo);
+		glBufferData(GL_ARRAY_BUFFER, mesh->mNumFaces * 3 * sizeof(float), index, GL_STATIC_DRAW);
+
+		shape.materialID = mesh->mMaterialIndex;
+		shape.drawCount = mesh->mNumFaces * 3;
+		vertex_shape.push_back(shape);
+	}
+
+	aiReleaseImport(scene);
+
+}
+
+void My_LoadModels()
+{
+	tinyobj::attrib_t attrib;
+	vector<tinyobj::shape_t> shapes;
+	vector<tinyobj::material_t> materials;
+	string warn;
+	string err;
+	bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "nanosuit.obj");
+	if (!warn.empty()) {
+		cout << warn << endl;
+	}
+	if (!err.empty()) {
+		cout << err << endl;
+	}
+	if (!ret) {
+		exit(1);
+	}
+
+	vector<float> vertices, texcoords, normals;  // if OBJ preserves vertex order, you can use element array buffer for memory efficiency
+	for (int s = 0; s < shapes.size(); ++s) {  // for 'ladybug.obj', there is only one object
+		int index_offset = 0;
+		for (int f = 0; f < shapes[s].mesh.num_face_vertices.size(); ++f) {
+			int fv = shapes[s].mesh.num_face_vertices[f];
+			for (int v = 0; v < fv; ++v) {
+				tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
+				vertices.push_back(attrib.vertices[3 * idx.vertex_index + 0]);
+				vertices.push_back(attrib.vertices[3 * idx.vertex_index + 1]);
+				vertices.push_back(attrib.vertices[3 * idx.vertex_index + 2]);
+				texcoords.push_back(attrib.texcoords[2 * idx.texcoord_index + 0]);
+				texcoords.push_back(attrib.texcoords[2 * idx.texcoord_index + 1]);
+				normals.push_back(attrib.normals[3 * idx.normal_index + 0]);
+				normals.push_back(attrib.normals[3 * idx.normal_index + 1]);
+				normals.push_back(attrib.normals[3 * idx.normal_index + 2]);
+			}
+			index_offset += fv;
+			m_shape.drawCount += fv;
+		}
+	}
+
+	glGenVertexArrays(1, &m_shape.vao);
+	glBindVertexArray(m_shape.vao);
+
+	glGenBuffers(1, &m_shape.vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, m_shape.vbo);
+
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float) + texcoords.size() * sizeof(float) + normals.size() * sizeof(float), NULL, GL_STATIC_DRAW);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
+	glBufferSubData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), texcoords.size() * sizeof(float), texcoords.data());
+	glBufferSubData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float) + texcoords.size() * sizeof(float), normals.size() * sizeof(float), normals.data());
+
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, (GLvoid*)(vertices.size() * sizeof(float)));
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*)(vertices.size() * sizeof(float) + texcoords.size() * sizeof(float)));
+	glEnableVertexAttribArray(2);
+
+	shapes.clear();
+	shapes.shrink_to_fit();
+	materials.clear();
+	materials.shrink_to_fit();
+	vertices.clear();
+	vertices.shrink_to_fit();
+	texcoords.clear();
+	texcoords.shrink_to_fit();
+	normals.clear();
+	normals.shrink_to_fit();
+
+	cout << "Load " << m_shape.drawCount << " vertices" << endl;
+}
+
+/*-----------------------------------------------Environment Mapping part-----------------------------------------------*/
+
+void toon_Init() {
+	uniforms.toon.mv_matrix = glGetUniformLocation(model_program, "mv_matrix");
+	uniforms.toon.proj_matrix = glGetUniformLocation(model_program, "proj_matrix");
+
+	static const GLubyte toon_tex_data[] =
+	{
+		//0x44, 0x00, 0x00, 0x00,
+		//0x88, 0x00, 0x00, 0x00,
+		//0xCC, 0x00, 0x00, 0x00,
+		//0xFF, 0x00, 0x00, 0x00
+		0xC5, 0xB3, 0x58, 0x00,
+		0xCF, 0xB5, 0x3B, 0x00,
+		0xD4, 0xAF, 0x37, 0x00,
+		0xFF, 0xDF, 0x00, 0x00
+	};
+
+	glGenTextures(1, &tex_toon);
+	glBindTexture(GL_TEXTURE_1D, tex_toon);
+	glTexImage1D(GL_TEXTURE_1D, 0,
+		GL_RGBA, sizeof(toon_tex_data) / 4, 0,
+		GL_RGBA, GL_UNSIGNED_BYTE,
+		toon_tex_data);
+	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+}
+
+void toon_Render() {
+
+
+	float currentTime = glutGet(GLUT_ELAPSED_TIME) * 0.001f;
+
+	glUseProgram(model_program);
+
+
+	model_matrix = translate(mat4(1.0), vec3());
+	//model_matrix = translate(model_matrix, vec3(-10.0f, -13.0f, -8.0f));
+	model_matrix = translate(model_matrix, vec3(-250.0f, 20.0f, -30.0f));
+
+	model_matrix = scale(model_matrix, vec3(10.0f, 10.0f, 10.0f));
+
+	glBindVertexArray(m_shape.vao);
+
+	glUniformMatrix4fv(uniforms.toon.mv_matrix, 1, GL_FALSE, &(view * model_matrix)[0][0]);
+	glUniformMatrix4fv(uniforms.toon.proj_matrix, 1, GL_FALSE, &projection[0][0]);
+
+	glBindTexture(GL_TEXTURE_1D, tex_toon);
+
+	glDrawArrays(GL_TRIANGLES, 0, m_shape.drawCount);
+}
+
+void renderModel() {
+	glUseProgram(scene_program);
+
+	model_matrix = translate(mat4(1.0), vec3());
+	//model_matrix = translate(model_matrix, vec3(-10.0f, -13.0f, -8.0f));
+	model_matrix = translate(model_matrix, vec3(-250.0f, 20.0f, -30.0f));
+
+	model_matrix = scale(model_matrix, vec3(10.0f, 10.0f, 10.0f));
+
+	glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(view * model_matrix));
+
+	glBindVertexArray(m_shape.vao);
+
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glDrawArrays(GL_TRIANGLES, 0, m_shape.drawCount);
+}
+
+void model_Init() {
+	model_program = glCreateProgram();
+
+	GLuint model_vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	GLuint model_fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+	char** model_vertexShaderSource = loadShaderSource("toon.vs.glsl");
+	char** model_fragmentShaderSource = loadShaderSource("toon.fs.glsl");
+
+	glShaderSource(model_vertexShader, 1, model_vertexShaderSource, NULL);
+	glShaderSource(model_fragmentShader, 1, model_fragmentShaderSource, NULL);
+
+	freeShaderSource(model_vertexShaderSource);
+	freeShaderSource(model_fragmentShaderSource);
+
+	glCompileShader(model_vertexShader);
+	glCompileShader(model_fragmentShader);
+
+	shaderLog(model_vertexShader);
+	shaderLog(model_fragmentShader);
+
+	glAttachShader(model_program, model_vertexShader);
+	glAttachShader(model_program, model_fragmentShader);
+	glLinkProgram(model_program);
+	glUseProgram(model_program);
+
+	toon_Init();
+	My_LoadModels();
+}
+
+
+
+/*-----------------------------------------------Environment Mapping part-----------------------------------------------*/
+
 
 /*-----------------------------------------------Skybox part-----------------------------------------------*/
 vector<string> faces = { "cubemaps\\face-r.jpg", "cubemaps\\face-l.jpg", "cubemaps\\face-t.jpg", "cubemaps\\face-d.jpg", "cubemaps\\face-b.jpg", "cubemaps\\face-f.jpg" };
@@ -154,98 +441,7 @@ void SkyboxRendering()
 }
 /*-----------------------------------------------Skybox part-----------------------------------------------*/
 
-void loadScene() {
-	//Importer
-	const aiScene *scene = aiImportFile("sponza.obj", aiProcessPreset_TargetRealtime_MaxQuality);
 
-	//Materials
-	for (unsigned int i = 0; i < scene->mNumMaterials; i++)
-	{
-		aiMaterial *material = scene->mMaterials[i];
-		Material materials;
-		aiString texturePath;
-		texture_data texture;
-		if (material->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath) == aiReturn_SUCCESS)
-		{
-			// load width, height and data from texturePath.C_Str();
-			texture = loadImg(texturePath.C_Str());
-			glGenTextures(1, &materials.diffuse_tex);
-			glBindTexture(GL_TEXTURE_2D, materials.diffuse_tex);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, texture.width, texture.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, texture.data);
-			glGenerateMipmap(GL_TEXTURE_2D);
-		}
-		else{
-			// load some default image as default_diffuse_tex
-
-		}
-		vertex_material.push_back(materials);
-	}
-
-	//Geometry
-	for (unsigned int i = 0; i < scene->mNumMeshes; i++)
-	{
-		aiMesh *mesh = scene->mMeshes[i];
-		Shape shape;
-		glGenVertexArrays(1, &shape.vao);
-		glBindVertexArray(shape.vao);
-
-		// create 3 vbos to hold data
-		glGenBuffers(1, &shape.vbo_position);
-		glGenBuffers(1, &shape.vbo_normal);
-		glGenBuffers(1, &shape.vbo_texcoord);
-
-		float* position = new float[mesh->mNumVertices * 3];
-		float* normal = new float[mesh->mNumVertices * 3];
-		float* texcoord = new float[mesh->mNumVertices * 3];
-		unsigned int* index = new unsigned int[mesh->mNumFaces * 3];
-		int index_po, index_nor, index_tex, index_ibo;
-
-		index_po = index_nor = index_tex = 0;
-		for (unsigned int v = 0; v < mesh->mNumVertices; v++)
-		{
-			for (int i = 0; i < 3; i++) {
-				*(position + index_po++) = mesh->mVertices[v][i];
-				*(normal + index_nor++) = mesh->mNormals[v][i];
-			}
-
-			for (int i = 0; i < 2; i++)
-				*(texcoord + index_tex++) = mesh->mTextureCoords[0][v][i];
-		}
-		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_position);
-		glBufferData(GL_ARRAY_BUFFER, mesh->mNumVertices * 3 * sizeof(float), position, GL_STATIC_DRAW);
-		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, NULL);
-
-		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_texcoord);
-		glBufferData(GL_ARRAY_BUFFER, mesh->mNumVertices * 2 * sizeof(float), texcoord, GL_STATIC_DRAW);
-		glEnableVertexAttribArray(1);
-		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, NULL);
-
-		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_normal);
-		glBufferData(GL_ARRAY_BUFFER, mesh->mNumVertices * 3 * sizeof(float), normal, GL_STATIC_DRAW);
-		glEnableVertexAttribArray(2);
-		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, NULL);
-
-		// create 1 ibo to hold data
-		glGenBuffers(1, &shape.ibo);
-		index_ibo = 0;
-		for (unsigned int f = 0; f < mesh->mNumFaces; f++)
-		{
-			for (int i = 0; i < 3; i++)
-				index[index_ibo++] = mesh->mFaces[f].mIndices[i];
-		}
-
-		glBindBuffer(GL_ARRAY_BUFFER, shape.ibo);
-		glBufferData(GL_ARRAY_BUFFER, mesh->mNumFaces * 3 * sizeof(float), index, GL_STATIC_DRAW);
-
-		shape.materialID = mesh->mMaterialIndex;
-		shape.drawCount = mesh->mNumFaces * 3;
-		vertex_shape.push_back(shape);
-	}
-
-	aiReleaseImport(scene);
-
-}
 
 void initScene() {
 	// Create Shader Program
@@ -338,6 +534,8 @@ void My_Init()
 
 	initScene();
 	skyboxInitFunction();
+
+	model_Init();
 }
 
 void My_Display()
@@ -347,6 +545,13 @@ void My_Display()
 	SkyboxRendering();
 
 	renderScene();
+
+	if (texture_mode == 0) {
+		renderModel();
+	}
+	else if (texture_mode == 1) {
+		toon_Render();
+	}
 
     glutSwapBuffers();
 }
@@ -413,6 +618,13 @@ void My_Keyboard(unsigned char key, int x, int y)
 	if (key == 'd' || key == 'D') cameraPos += normalize(cross(cameraFront, cameraUp)) * cameraSpeed;
 	if (key == 'z' || key == 'Z') cameraPos.y += 5.0f;
 	if (key == 'x' || key == 'X') cameraPos.y -= 5.0f;
+
+	if (key == 'r' || key == 'R') {
+		texture_mode += 1;
+		if (texture_mode == 2) {
+			texture_mode = 0;
+		}
+	}
 }
 
 void My_SpecialKeys(int key, int x, int y)
