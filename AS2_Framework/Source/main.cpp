@@ -263,10 +263,14 @@ void toon_Init() {
 
 	static const GLubyte toon_tex_data[] =
 	{
-		0x44, 0x00, 0x00, 0x00,
-		0x88, 0x00, 0x00, 0x00,
-		0xCC, 0x00, 0x00, 0x00,
-		0xFF, 0x00, 0x00, 0x00
+		//0x44, 0x00, 0x00, 0x00,
+		//0x88, 0x00, 0x00, 0x00,
+		//0xCC, 0x00, 0x00, 0x00,
+		//0xFF, 0x00, 0x00, 0x00
+		0xC5, 0xB3, 0x58, 0x00,
+		0xCF, 0xB5, 0x3B, 0x00,
+		0xD4, 0xAF, 0x37, 0x00,
+		0xFF, 0xDF, 0x00, 0x00
 	};
 
 	glGenTextures(1, &tex_toon);
@@ -347,12 +351,7 @@ void model_Init() {
 	glLinkProgram(model_program);
 	glUseProgram(model_program);
 
-	if (texture_mode == 0) {
-		toon_Init();
-	}
-	else if (texture_mode == 1) {
-		toon_Init();
-	}
+	toon_Init();
 	My_LoadModels();
 }
 
@@ -547,7 +546,12 @@ void My_Display()
 
 	renderScene();
 
-	toon_Render();
+	if (texture_mode == 0) {
+		renderModel();
+	}
+	else if (texture_mode == 1) {
+		toon_Render();
+	}
 
     glutSwapBuffers();
 }
@@ -614,6 +618,13 @@ void My_Keyboard(unsigned char key, int x, int y)
 	if (key == 'd' || key == 'D') cameraPos += normalize(cross(cameraFront, cameraUp)) * cameraSpeed;
 	if (key == 'z' || key == 'Z') cameraPos.y += 5.0f;
 	if (key == 'x' || key == 'X') cameraPos.y -= 5.0f;
+
+	if (key == 'r' || key == 'R') {
+		texture_mode += 1;
+		if (texture_mode == 2) {
+			texture_mode = 0;
+		}
+	}
 }
 
 void My_SpecialKeys(int key, int x, int y)

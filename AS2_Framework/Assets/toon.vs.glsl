@@ -3,8 +3,8 @@
 uniform mat4 mv_matrix;                              
 uniform mat4 proj_matrix;                            
                                                          
-layout (location = 0) in vec4 position;              
-layout (location = 1) in vec3 normal;                
+layout (location = 0) in vec3 position;              
+layout (location = 2) in vec3 normal;                
                                                          
 out VS_OUT                                           
 {                                                    
@@ -14,7 +14,7 @@ out VS_OUT
                                                          
 void main(void)                                      
 {                                                    
-    vec4 pos_vs = mv_matrix * position;              
+    vec4 pos_vs = mv_matrix * vec4(position, 1.0);              
                                                          
     // Calculate eye-space normal and position       
     vs_out.normal = mat3(mv_matrix) * normal;        

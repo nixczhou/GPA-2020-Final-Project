@@ -2,7 +2,7 @@
                                                          
 uniform sampler1D tex_toon;                          
                                                          
-uniform vec3 light_pos = vec3(-150.0f, 50.0f, 10.0f); 
+uniform vec3 light_pos = vec3(30.0, 30.0, 100.0); 
                                                          
 in VS_OUT                                            
 {                                                    
@@ -22,6 +22,6 @@ void main(void)
     float tc = pow(max(0.0, dot(N, L)), 5.0);        
                                                          
     // Sample from cell shading texture              
-    color = texture(tex_toon, tc) * (tc * 0.8 + 0.2);              
+    color = texture(tex_toon, tc) * tc;              
 }                                                    
                                                          
