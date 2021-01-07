@@ -4,11 +4,11 @@
 - [x]  Blinn-phong 5
 - [x]  Skybox 5
 - [ ]  ~~Toon shading 5~~ (放棄)
-- [ ]  Framebuffer 5
+- [X]  Framebuffer 5
 - [ ]  Environment mapping 5
 - [ ]  Normal mapping 5
 - [ ]  Terrain 10
-- [x]  SSAO 10
+- [ ]  SSAO 10
 ### Adv :
 - [ ]  Water 10
 - [ ]  Particle 10
