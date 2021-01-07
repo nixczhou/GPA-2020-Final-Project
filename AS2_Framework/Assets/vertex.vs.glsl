@@ -1,40 +1,51 @@
-#version 410 core
+#version 410
 
 layout(location = 0) in vec3 iv3vertex;
 layout(location = 1) in vec2 iv2tex_coord;
 layout(location = 2) in vec3 iv3normal;
+layout(location = 3) in vec3 iv3tangent;
 
 uniform mat4 um4mv;
 uniform mat4 um4p;
+uniform mat4 lightSpaceMatrix;
 
-// Inputs from vertex shader                           
-out VS_OUT
+out VertexData
 {
-	vec3 N;
-	vec3 L;
+    vec3 N; // eye space normal
+    vec3 L; // eye space light vector
 	vec3 V;
-	vec2 texcoord;
-} vs_out;
+    vec3 H; // eye space halfway vector
+    vec2 texcoord;
+	vec4 fragPosLightSpace;
 
-// Position of light                                   
-uniform vec3 light_pos = vec3(100.0, 100.0, 100.0);
+	vec3 FragPos;
+    vec3 TangentFragPos;
+	vec3 viewN;
+} vertexData;
 
-void main(void)
+out vec4 viewSpace_coord;
+
+void main()
 {
-	// Calculate view-space coordinate                 
+	mat3 normalMatrix = transpose(inverse(mat3(um4mv)));
 	vec4 P = um4mv * vec4(iv3vertex, 1.0);
+	vec3 T = normalize(normalMatrix * iv3tangent);
+	vec3 N = normalize(normalMatrix * iv3normal);
+	vec3 B = cross(N, T);
+	T = normalize(T - dot(T, N) * N);
+	mat3 TBN = transpose(mat3(T, B, N));
 
-	// Calculate normal in view-space                  
-	vs_out.N = mat3(um4mv) * iv3normal;
+	gl_Position = um4p * um4mv * vec4(iv3vertex, 1.0);
+	vertexData.texcoord = iv2tex_coord;
 
-	// Calculate light vector                          
-	vs_out.L = light_pos - P.xyz;
+	viewSpace_coord = um4mv * vec4(iv3vertex, 1.0);
+	vertexData.fragPosLightSpace = lightSpaceMatrix * vec4(iv3vertex, 1.0);
+ 
+	vertexData.N = TBN * N;
+	vertexData.L = TBN * (um4mv * vec4(0, 1, -1, 0)).xyz;
+    vertexData.V  = TBN * (-P.xyz);
 
-	// Calculate view vector                           
-	vs_out.V = -P.xyz;
-
-	// Calculate the clip-space position of each vertex
-	gl_Position = um4p * P;
-
-	vs_out.texcoord = iv2tex_coord;
+    vertexData.TangentFragPos  = TBN * vec3(um4mv * vec4(iv3vertex, 0.0));
+	
+	vertexData.viewN = N;
 }
