@@ -16,6 +16,7 @@
 #include "STB/stb_image.h"
 #include "utils/glutils.hpp"
 #include "utils/timer.hpp"
+#include "assimp/Importer.hpp"
 #include "assimp/cimport.h"
 #include "assimp/scene.h"
 #include "assimp/postprocess.h"
