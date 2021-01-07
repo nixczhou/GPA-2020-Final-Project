@@ -648,6 +648,7 @@ typedef struct Model {
 } Model;
 
 Model objModel;
+Model objhuman;
 // ---------------------------------------------------- Loader ---------------------------------------------------->
 
 void My_LoadModels()
@@ -816,10 +817,8 @@ void toon_Render() {
 
 
 	model_matrix = translate(mat4(1.0), vec3());
-	//model_matrix = translate(model_matrix, vec3(-10.0f, -13.0f, -8.0f));
-	model_matrix = translate(model_matrix, vec3(-250.0f, 20.0f, -30.0f));
-
-	model_matrix = scale(model_matrix, vec3(10.0f, 10.0f, 10.0f));
+	model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
+	model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
 
 	glBindVertexArray(m_shape.vao);
 
@@ -828,23 +827,6 @@ void toon_Render() {
 
 	glBindTexture(GL_TEXTURE_1D, tex_toon);
 
-	glDrawArrays(GL_TRIANGLES, 0, m_shape.drawCount);
-}
-
-void renderModel() {
-	glUseProgram(scene_program);
-
-	model_matrix = translate(mat4(1.0), vec3());
-	//model_matrix = translate(model_matrix, vec3(-10.0f, -13.0f, -8.0f));
-	model_matrix = translate(model_matrix, vec3(-250.0f, 20.0f, -30.0f));
-
-	model_matrix = scale(model_matrix, vec3(10.0f, 10.0f, 10.0f));
-
-	glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(view * model_matrix));
-
-	glBindVertexArray(m_shape.vao);
-
-	glBindTexture(GL_TEXTURE_2D, 0);
 	glDrawArrays(GL_TRIANGLES, 0, m_shape.drawCount);
 }
 
@@ -877,7 +859,7 @@ void model_Init() {
 	toon_Init();
 	//shadow_Init();
 	//SSAO_Init();
-	//My_LoadModels();
+	My_LoadModels();
 }
 
 /*-----------------------------------------------Toon Shading and Model Part-----------------------------------------------*/
@@ -1020,6 +1002,7 @@ void initScene() {
 
 	//loadScene();
 	objModel.loadModel("./eastern ancient casttle.obj");
+	objhuman.loadModel("./nanosuit.obj");
 }
 
 void renderScene() {
@@ -1039,6 +1022,16 @@ void renderScene() {
 	glUniform1i(depthMapLocation, 9);
 
 	objModel.Draw(scene_program);
+}
+
+void renderModel() {
+	glUseProgram(scene_program);
+
+	model_matrix = translate(mat4(1.0), vec3());
+	model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
+	model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
+	glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(view * model_matrix));
+	objhuman.Draw(scene_program);
 }
 
 //-----------------End Load Scene Function and Variables------------------------
@@ -1316,15 +1309,14 @@ void My_Init()
 	model_Init();
 	shadow_Init();
 
-	ssaoSetup();
+	//ssaoSetup();
 
 	init_post_framebuffer();
-
 }
 
 void My_Display()
 {
-
+	
 	glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
 	glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1335,7 +1327,13 @@ void My_Display()
 	glCullFace(GL_FRONT);
 	objModel.Draw(depth_program);
 
-	//glUseProgram(depth_program);
+	glUseProgram(depth_program);
+
+	model_matrix = translate(mat4(1.0), vec3());
+	model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
+	model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
+	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, value_ptr(model_matrix));
+	objhuman.Draw(depth_program);
 
 	glCullFace(GL_BACK);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -1349,6 +1347,12 @@ void My_Display()
 
 	SkyboxRendering();
 
+	if (texture_mode == 0) {
+		renderModel();
+	}
+	else if (texture_mode == 1) {
+		toon_Render();
+	}
 
 	//glBindFramebuffer(GL_FRAMEBUFFER, mainFBO);
 	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -1386,8 +1390,9 @@ void My_Display()
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	glEnable(GL_DEPTH_TEST);
 
-
+	
 	post_render();
+
 
 	/*
 	if (texture_mode == 0) {
