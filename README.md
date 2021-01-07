@@ -3,6 +3,7 @@
 ### Basic:
 - [x]  Blinn-phong 5
 - [x]  Skybox 5
+- [x]  Shadow Map 5
 - [ ]  ~~Toon shading 5~~ (放棄)
 - [X]  Framebuffer 5
 - [ ]  Environment mapping 5
