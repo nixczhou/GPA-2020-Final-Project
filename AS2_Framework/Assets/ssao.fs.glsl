@@ -35,14 +35,14 @@ void main()
 	vec4 fragAO;
 	if (enabled == 0)
 	{
-		fragAO = texture(color_map , fs_in.texcoord);
+		fragAO = texture(color_map, fs_in.texcoord);
 	}
 	else
 	{
 		float depth = texture(depth_map, fs_in.texcoord).r;
-		if(depth == 1.0)
+		if (depth == 1.0)
 		{
-			fragAO = texture(color_map , fs_in.texcoord);
+			fragAO = texture(color_map, fs_in.texcoord);
 		}
 		else
 		{
@@ -54,9 +54,9 @@ void main()
 			vec3 T = normalize(randvec - N * dot(randvec, N));
 			vec3 B = cross(N, T);
 			mat3 tbn = mat3(T, B, N); // tangent to eye matrix
-			const float radius = 30.0;
+			const float radius = 50.0;
 			float ao = 0.0;
-			for(int i = 0; i < numKernels; ++i)
+			for (int i = 0; i < numKernels; ++i)
 			{
 				vec4 sampleEye = position + vec4(tbn * kernals[i].xyz * radius, 0.0);
 				vec4 sampleP = proj * sampleEye;
@@ -65,26 +65,26 @@ void main()
 				float sampleDepth = texture(depth_map, sampleP.xy).r;
 				vec4 invP = invproj * vec4(vec3(sampleP.xy, sampleDepth) * 2.0 - 1.0, 1.0);
 				invP /= invP.w;
-				if(sampleDepth > sampleP.z || length(invP - position) > radius)
+				if (sampleDepth > sampleP.z || length(invP - position) > radius)
 				{
 					ao += 1.0;
 				}
 			}
-			vec3 color = texture(color_map	, fs_in.texcoord).xyz;
+			vec3 color = texture(color_map, fs_in.texcoord).xyz;
 			fragAO = vec4(color * ao / numKernels, 1.0);
 		}
 	}
 
 	vec3 viewSpace_coord = texture(viewSpacePosTex, fs_in.texcoord).xyz;
-	if(fogEffect_switch == 1)
+	if (fogEffect_switch == 1)
 	{
 		//Turn Fog Effect On (Recommended)
 		float dist = length(viewSpace_coord);
-		fogFactor = (dist-fog_start)/(fog_end-fog_start);
-		fogFactor = clamp( fogFactor, 0.0, 1.0 );
+		fogFactor = (dist - fog_start) / (fog_end - fog_start);
+		fogFactor = clamp(fogFactor, 0.0, 1.0);
 		finalColor = mix(fragAO, fogColor, fogFactor);
 	}
-	else if(fogEffect_switch == 0)
+	else if (fogEffect_switch == 0)
 	{
 		//Turn Fog Effect Off (Use At Your OWN RISK)
 		finalColor = fragAO;

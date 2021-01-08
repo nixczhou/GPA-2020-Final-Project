@@ -7,14 +7,14 @@ d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\sourc
 d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(418): warning C4018: '<': signed/unsigned mismatch
 d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(673): warning C4018: '<': signed/unsigned mismatch
 d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(675): warning C4018: '<': signed/unsigned mismatch
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1171): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
 d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1172): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
 d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1173): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1175): warning C4244: 'initializing': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1279): warning C4244: 'argument': conversion from 'time_t' to 'unsigned int', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1282): warning C4244: 'initializing': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1459): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1460): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1467): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1468): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
+d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1174): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
+d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1176): warning C4244: 'initializing': conversion from 'int' to 'float', possible loss of data
+d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1278): warning C4244: 'argument': conversion from 'time_t' to 'unsigned int', possible loss of data
+d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1281): warning C4244: 'initializing': conversion from 'int' to 'float', possible loss of data
+d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1457): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
+d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1458): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
+d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1465): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
+d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1466): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
   AS2_Framework.vcxproj -> D:\nico-course\graphics\final-project\GPA-2020-Final-Project\AS2_Framework\VC14\Debug\AS2_Framework.exe

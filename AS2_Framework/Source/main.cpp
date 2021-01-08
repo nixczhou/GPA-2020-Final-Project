@@ -946,7 +946,7 @@ void SkyboxRendering()
 }
 /*-----------------------------------------------Skybox part-----------------------------------------------*/
 
-glm::mat4 lightViewing = glm::lookAt(glm::vec3(1000.0f, 2000.0f, -1000.0f), glm::vec3(1000.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+glm::mat4 lightViewing = glm::lookAt(glm::vec3(100.0f, 2000.0f, -1000.0f), glm::vec3(1000.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 glm::mat4 lightProj = glm::ortho(-3500.0f, 3500.0f, -3500.0f, 3500.0f, 800.0f, 4000.0f);
 glm::mat4 lightSpace = lightProj * lightViewing;
 
@@ -1044,6 +1044,7 @@ GLuint postprocessing_program;
 GLuint FBO;
 GLuint depthRBO;
 GLuint FBODataTexture;
+GLuint mainColorTexture;
 GLuint vao2;
 GLuint window_vertex_buffer;
 GLuint filter_mode_location;
@@ -1161,7 +1162,7 @@ void post_render() {
 	glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
 
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, FBODataTexture);
+	glBindTexture(GL_TEXTURE_2D, mainColorTexture);
 
 	glBindVertexArray(vao2);
 	glUseProgram(postprocessing_program);
@@ -1185,11 +1186,10 @@ int lightEffect = 1;
 int fogEffect = 0;
 int normalMapEffect = 1;
 int shadowMapEffect = 1;
-int ssaoEffect = 1;
-
+int ssaoEffect = 0;
 
 GLuint mainFBO;
-GLuint mainColorTexture;
+
 GLuint mainDepthTexture;
 GLuint mainNormalTexture;
 GLuint viewSpacePosTex;
@@ -1218,31 +1218,30 @@ void ssaoSetup()
 
 	// Gen FBO
 	glGenFramebuffers(1, &mainFBO);
+}
+
+void ssao_reshape_setup() {
 	// Gen texture
 	glGenTextures(1, &mainColorTexture);
 	glBindTexture(GL_TEXTURE_2D, mainColorTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
-		viewport_size.width, viewport_size.height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, viewport_size.width, viewport_size.height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glGenTextures(1, &mainDepthTexture);
 	glBindTexture(GL_TEXTURE_2D, mainDepthTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F,
-		viewport_size.width, viewport_size.height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, viewport_size.width, viewport_size.height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	glGenTextures(1, &mainNormalTexture);
 	glBindTexture(GL_TEXTURE_2D, mainNormalTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F,
-		viewport_size.width, viewport_size.height, 0, GL_RGB, GL_FLOAT, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, viewport_size.width, viewport_size.height, 0, GL_RGB, GL_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glGenTextures(1, &viewSpacePosTex);
 	glBindTexture(GL_TEXTURE_2D, viewSpacePosTex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F,
-		viewport_size.width, viewport_size.height, 0, GL_RGB, GL_FLOAT, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, viewport_size.width, viewport_size.height, 0, GL_RGB, GL_FLOAT, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	// Attach to FBO
@@ -1290,80 +1289,12 @@ void ssaoSetup()
 	}
 	glBufferData(GL_UNIFORM_BUFFER, numKernels * sizeof(vec4), &kernals[0][0], GL_STATIC_DRAW);
 
-
 	fogEffect_switch = glGetUniformLocation(ssaoProgram, "fogEffect_switch");
 }
 
-/*-----------------------------------------------SSAO--------------------------------------*/
-
-
-void My_Init()
-{
-	glClearColor(0.0f, 0.6f, 0.0f, 1.0f);
-	glEnable(GL_DEPTH_TEST);
-	//glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
-	glDepthFunc(GL_LEQUAL);
-
-	initScene();
-	skyboxInitFunction();
-	model_Init();
-	shadow_Init();
-
-	//ssaoSetup();
-
-	init_post_framebuffer();
-}
-
-void My_Display()
-{
-	
-	glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-	glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	glUseProgram(depth_program);
-
-	glUniformMatrix4fv(lightSpaceMatrixLocation, 1, GL_FALSE, value_ptr(lightSpace));
-	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, value_ptr(mat4(1.0f)));
-	glCullFace(GL_FRONT);
-	objModel.Draw(depth_program);
-
-	glUseProgram(depth_program);
-
-	model_matrix = translate(mat4(1.0), vec3());
-	model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
-	model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
-	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, value_ptr(model_matrix));
-	objhuman.Draw(depth_program);
-
-	glCullFace(GL_BACK);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-	// Bind Post Processing FBO
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, FBO);
-	// Which render buffer attachment is written
-	glDrawBuffer(GL_COLOR_ATTACHMENT0);
-
-	glViewport(0, 0, viewport_size.width, viewport_size.height);
-
-	SkyboxRendering();
-
-	if (texture_mode == 0) {
-		renderModel();
-	}
-	else if (texture_mode == 1) {
-		toon_Render();
-	}
-
-	//glBindFramebuffer(GL_FRAMEBUFFER, mainFBO);
+void ssao_render() {
+	//glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	//glDrawBuffer(GL_COLOR_ATTACHMENT0);
-
-	renderScene();
-
-
-	// SSAO
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glUseProgram(ssaoProgram);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, mainColorTexture);
@@ -1389,19 +1320,90 @@ void My_Display()
 	glDisable(GL_DEPTH_TEST);
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	glEnable(GL_DEPTH_TEST);
+}
 
-	
-	post_render();
+/*-----------------------------------------------SSAO--------------------------------------*/
 
 
-	/*
+void My_Init()
+{
+	glClearColor(0.0f, 0.6f, 0.0f, 1.0f);
+	glEnable(GL_DEPTH_TEST);
+	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+	glDepthFunc(GL_LEQUAL);
+
+	initScene();
+	skyboxInitFunction();
+	model_Init();
+	shadow_Init();
+
+	ssaoSetup();
+
+	init_post_framebuffer();
+}
+
+void My_Display()
+{
+	//======================= Begin Shadow Depth Pas=================================
+	glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+	glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glUseProgram(depth_program);
+
+	glUniformMatrix4fv(lightSpaceMatrixLocation, 1, GL_FALSE, value_ptr(lightSpace));
+	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, value_ptr(mat4(1.0f)));
+	glCullFace(GL_FRONT);
+	objModel.Draw(depth_program);
+
+	glUseProgram(depth_program);
+
+	model_matrix = translate(mat4(1.0), vec3());
+	model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
+	model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
+	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, value_ptr(model_matrix));
+	objhuman.Draw(depth_program);
+
+	glCullFace(GL_BACK);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	//=======================End Shadow Depth Pas=================================
+
+	glViewport(0, 0, viewport_size.width, viewport_size.height);
+
+	// Bind Post Processing FBO
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, FBO);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// Which render buffer attachment is written
+	//glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
+	SkyboxRendering();
+
 	if (texture_mode == 0) {
 		renderModel();
 	}
 	else if (texture_mode == 1) {
 		toon_Render();
 	}
-	*/
+
+	renderScene();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, mainFBO);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	//glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
+	SkyboxRendering();
+
+	if (texture_mode == 0) {
+		renderModel();
+	}
+	else if (texture_mode == 1) {
+		toon_Render();
+	}
+
+	renderScene();
+
+	ssao_render();
+	
+	post_render();
 
     glutSwapBuffers();
 }
@@ -1413,14 +1415,10 @@ void My_Reshape(int width, int height)
 	glViewport(0, 0, width, height);
 	viewportAspect = (float)width / (float)height;
 	projection = perspective(radians(45.0f), viewportAspect, 0.1f, 3000.f);
-	//projection = perspective(radians(60.0f), viewportAspect, 0.1f, 1000.f);
+
+	ssao_reshape_setup();
 
 	init_post_rbo();
-
-	//glBindTexture(GL_TEXTURE_2D, gbuffer.normal_map);
-	//glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
-	//glBindTexture(GL_TEXTURE_2D, gbuffer.depth_map);
-	//glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
 }
 
 void My_Timer(int val)
@@ -1554,10 +1552,10 @@ void My_Menu(int id)
 		mode = 5;
 		break;
 	case '6':
-		texture_mode = 1;
+		ssaoEffect = !ssaoEffect;
 		break;
 	case '7':
-		texture_mode = 0;
+		fogEffect = !fogEffect;
 		break;
 	default:
 		break;
@@ -1579,8 +1577,8 @@ int main(int argc, char *argv[])
     glutInitDisplayMode(GLUT_3_2_CORE_PROFILE | GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
 #endif
 	glutInitWindowPosition(100, 100);
-	glutInitWindowSize(600, 600);
-	glutCreateWindow("AS2_Framework"); // You cannot use OpenGL functions before this line; The OpenGL context must be created first by glutCreateWindow()!
+	glutInitWindowSize(1066, 600);
+	glutCreateWindow("Final Project Team 8"); // You cannot use OpenGL functions before this line; The OpenGL context must be created first by glutCreateWindow()!
 #ifdef _MSC_VER
 	glewInit();
 #endif
@@ -1599,8 +1597,8 @@ int main(int argc, char *argv[])
 	glutAddMenuEntry("Bloom Effect", '3');
 	glutAddMenuEntry("Pixelization", '4');
 	glutAddMenuEntry("Sine Wave Distortion", '5');
-	glutAddMenuEntry("Normal As Color", '6');
-	glutAddMenuEntry("Default Texture", '7');
+	glutAddMenuEntry("SSAO", '6');
+	glutAddMenuEntry("Fog Effect", '7');
 	glutAddMenuEntry("Exit", MENU_EXIT);
 
 	glutSetMenu(menu_timer);

@@ -1,15 +1,15 @@
- #version 410 core
+#version 410 core
 
- out VS_OUT
- {
+out VS_OUT
+{
 	vec3 tc;
- }vs_out;
+}vs_out;
 
- uniform mat4 inv_vp_matrix;
- uniform vec3 eye;
+uniform mat4 inv_vp_matrix;
+uniform vec3 eye;
 
- void main(void)
- {
+void main(void)
+{
 	vec4[4] vertices = vec4[4]	(vec4(-1.0, -1.0, 1.0, 1.0),
 								vec4( 1.0, -1.0, 1.0, 1.0),
 								vec4(-1.0,  1.0, 1.0, 1.0),
@@ -19,4 +19,4 @@
 	p /= p.w;
 	vs_out.tc = normalize(p.xyz - eye);
 	gl_Position = vertices[gl_VertexID];
- }
+}
