@@ -1,20 +1,20 @@
 ﻿  main.cpp
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(20): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
-  c:\program files (x86)\windows kits\10\include\10.0.17763.0\ucrt\stdio.h(208): note: see declaration of 'fopen'
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(282): warning C4101: 'picHeight': unreferenced local variable
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(282): warning C4101: 'picWidth': unreferenced local variable
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(416): warning C4018: '<': signed/unsigned mismatch
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(418): warning C4018: '<': signed/unsigned mismatch
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(673): warning C4018: '<': signed/unsigned mismatch
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(675): warning C4018: '<': signed/unsigned mismatch
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1172): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1173): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1174): warning C4244: 'argument': conversion from 'int' to 'GLfloat', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1176): warning C4244: 'initializing': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1278): warning C4244: 'argument': conversion from 'time_t' to 'unsigned int', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1281): warning C4244: 'initializing': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1457): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1458): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1465): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
-d:\nico-course\graphics\final-project\gpa-2020-final-project\as2_framework\source\main.cpp(1466): warning C4244: '=': conversion from 'int' to 'float', possible loss of data
-  AS2_Framework.vcxproj -> D:\nico-course\graphics\final-project\GPA-2020-Final-Project\AS2_Framework\VC14\Debug\AS2_Framework.exe
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(20): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  c:\program files (x86)\windows kits\10\include\10.0.17763.0\ucrt\stdio.h(208): note: 請參閱 'fopen' 的宣告
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(282): warning C4101: 'picHeight': 未參考的區域變數
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(282): warning C4101: 'picWidth': 未參考的區域變數
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(416): warning C4018: '<': signed/unsigned 不相符
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(418): warning C4018: '<': signed/unsigned 不相符
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(673): warning C4018: '<': signed/unsigned 不相符
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(675): warning C4018: '<': signed/unsigned 不相符
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1302): warning C4244: '引數': 將 'int' 轉換為 'GLfloat'，由於類型不同，可能導致資料遺失
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1303): warning C4244: '引數': 將 'int' 轉換為 'GLfloat'，由於類型不同，可能導致資料遺失
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1304): warning C4244: '引數': 將 'int' 轉換為 'GLfloat'，由於類型不同，可能導致資料遺失
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1306): warning C4244: '正在初始化': 將 'int' 轉換為 'float'，由於類型不同，可能導致資料遺失
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1408): warning C4244: '引數': 將 'time_t' 轉換為 'unsigned int'，由於類型不同，可能導致資料遺失
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1411): warning C4244: '正在初始化': 將 'int' 轉換為 'float'，由於類型不同，可能導致資料遺失
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1593): warning C4244: '=': 將 'int' 轉換為 'float'，由於類型不同，可能導致資料遺失
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1594): warning C4244: '=': 將 'int' 轉換為 'float'，由於類型不同，可能導致資料遺失
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1601): warning C4244: '=': 將 'int' 轉換為 'float'，由於類型不同，可能導致資料遺失
+c:\users\timla\desktop\ms course doc\coding\gpa-2020-final-project\as2_framework\source\main.cpp(1602): warning C4244: '=': 將 'int' 轉換為 'float'，由於類型不同，可能導致資料遺失
+  AS2_Framework.vcxproj -> C:\Users\timla\Desktop\MS course doc\coding\GPA-2020-Final-Project\AS2_Framework\VC14\Debug\AS2_Framework.exe

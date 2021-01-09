@@ -946,6 +946,134 @@ void SkyboxRendering()
 }
 /*-----------------------------------------------Skybox part-----------------------------------------------*/
 
+/*----------------------------------------------- Terrain part (teacher) -----------------------------------------------*/
+GLuint terrain_program;
+GLuint tex_displacement;
+GLuint tex_color;
+GLuint terrain_vao;
+
+float dmap_depth;
+bool enable_displacement;
+bool wireframe;
+bool enable_fog;
+
+void Terrain_init()
+{
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+	terrain_program = glCreateProgram();
+
+	GLuint terrain_vs = glCreateShader(GL_VERTEX_SHADER);
+	GLuint terrain_tcs = glCreateShader(GL_TESS_CONTROL_SHADER);
+	GLuint terrain_tes = glCreateShader(GL_TESS_EVALUATION_SHADER);
+	GLuint terrain_fs = glCreateShader(GL_FRAGMENT_SHADER);
+
+	char** terrain_vs_source = loadShaderSource("terrain_lp.vs.glsl");
+	char** terrain_tcs_source = loadShaderSource("terrain_lp.tcs");
+	char** terrain_tes_source = loadShaderSource("terrain_lp.tes");
+	char** terrain_fs_source = loadShaderSource("terrain_lp.fs.glsl");
+
+	glShaderSource(terrain_vs, 1, terrain_vs_source, NULL);
+	glShaderSource(terrain_tcs, 1, terrain_tcs_source, NULL);
+	glShaderSource(terrain_tes, 1, terrain_tes_source, NULL);
+	glShaderSource(terrain_fs, 1, terrain_fs_source, NULL);
+
+	freeShaderSource(terrain_vs_source);
+	freeShaderSource(terrain_tcs_source);
+	freeShaderSource(terrain_tes_source);
+	freeShaderSource(terrain_fs_source);
+
+	glCompileShader(terrain_vs);
+	glCompileShader(terrain_tcs);
+	glCompileShader(terrain_tes);
+	glCompileShader(terrain_fs);
+
+	shaderLog(terrain_vs);
+	shaderLog(terrain_tcs);
+	shaderLog(terrain_tes);
+	shaderLog(terrain_fs);
+
+	glAttachShader(terrain_program, terrain_vs);
+	glAttachShader(terrain_program, terrain_tcs);
+	glAttachShader(terrain_program, terrain_tes);
+	glAttachShader(terrain_program, terrain_fs);
+
+	glLinkProgram(terrain_program);
+	glUseProgram(terrain_program);
+
+	glGenVertexArrays(1, &terrain_vao);
+	glBindVertexArray(terrain_vao);
+
+	dmap_depth = 6.0f;
+
+	texture_data tdata = loadImg("terragen.png");
+	tdata.data == NULL ? printf("load terrain height image fail\n") : printf("load terrain color height sucessful\n");
+	glEnable(GL_TEXTURE_2D);
+	glGenTextures(1, &tex_displacement);
+	glBindTexture(GL_TEXTURE_2D, tex_displacement);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, tdata.width, tdata.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, tdata.data);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	glActiveTexture(GL_TEXTURE1);
+	texture_data tdata2 = loadImg("terragen_color.png");
+	tdata2.data == NULL ? printf("load terrain color image fail\n") : printf("load terrain color image sucessful\n");
+	glGenTextures(1, &tex_color);
+	glBindTexture(GL_TEXTURE_2D, tex_color);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, tdata2.width, tdata2.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, tdata2.data);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	glPatchParameteri(GL_PATCH_VERTICES, 4);
+
+	//glEnable(GL_CULL_FACE);
+
+	enable_displacement = true;
+	wireframe = false;
+	enable_fog = false;
+}
+
+void Terrain_rendering()
+{
+	mat4 model_matrix = mat4(1.0f);
+	glm::vec3 scale = glm::vec3(30, 10, 30);
+	model_matrix = glm::scale(model_matrix, scale);
+
+	glUseProgram(terrain_program);
+	glBindVertexArray(terrain_vao);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, tex_displacement);
+	glUniform1i(glGetUniformLocation(terrain_program, "tex_displacement"), 0);
+
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, tex_color);
+	glUniform1i(glGetUniformLocation(terrain_program, "tex_color"), 1);
+
+	glUniformMatrix4fv(glGetUniformLocation(terrain_program, "mv_matrix"), 1, GL_FALSE, value_ptr(view * model_matrix));
+	glUniformMatrix4fv(glGetUniformLocation(terrain_program, "proj_matrix"), 1, GL_FALSE, value_ptr(projection));
+	glUniformMatrix4fv(glGetUniformLocation(terrain_program, "mvp_matrix"), 1, GL_FALSE, value_ptr(projection * view));
+	glUniform1f(glGetUniformLocation(terrain_program, "dmap_depth"), enable_displacement ? dmap_depth : 0.0f);
+	glUniform1i(glGetUniformLocation(terrain_program, "enable_fog"), enable_fog ? 1 : 0);
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthFunc(GL_LEQUAL);
+
+	if (wireframe)
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	else
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+	glDrawArraysInstanced(GL_PATCHES, 0, 4, 64 * 64);
+}
+/*----------------------------------------------- Terrain part (teacher) -----------------------------------------------*/
+
+
+
 glm::mat4 lightViewing = glm::lookAt(glm::vec3(100.0f, 2000.0f, -1000.0f), glm::vec3(1000.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 glm::mat4 lightProj = glm::ortho(-3500.0f, 3500.0f, -3500.0f, 3500.0f, 800.0f, 4000.0f);
 glm::mat4 lightSpace = lightProj * lightViewing;
@@ -1340,6 +1468,8 @@ void My_Init()
 	ssaoSetup();
 
 	init_post_framebuffer();
+
+	Terrain_init();
 }
 
 void My_Display()
@@ -1386,6 +1516,8 @@ void My_Display()
 
 	renderScene();
 
+	Terrain_rendering();
+
 	glBindFramebuffer(GL_FRAMEBUFFER, mainFBO);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	//glDrawBuffer(GL_COLOR_ATTACHMENT0);
@@ -1402,6 +1534,8 @@ void My_Display()
 	renderScene();
 
 	ssao_render();
+
+	Terrain_rendering();
 	
 	post_render();
 
