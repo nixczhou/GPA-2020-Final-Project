@@ -9,6 +9,7 @@
 - [ ]  Environment mapping 5
 - [ ]  Normal mapping 5
 - [ ]  Terrain 10
+- [ ]  FBX Animation 10
 - [X]  SSAO 10
 ### Adv :
 - [ ]  Water 10
