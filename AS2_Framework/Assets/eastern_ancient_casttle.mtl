@@ -11,7 +11,7 @@ Ks 0.0000 0.0000 0.0000
 Ke 0.0000 0.0000 0.0000
 map_Ka Maps/Terrain 1_mtl1_ambicol.jpg
 map_Kd Maps/grass22.jpg
-map_Bump Maps/Terrain 1_mtl1_bumpamt.jpg
+map_Bump Maps/grass22_normal.jpg
 
 newmtl default
 Ns 10.0000
@@ -25,6 +25,7 @@ Kd 1 1 1
 Ks 0.0000 0.0000 0.0000
 Ke 0.0000 0.0000 0.0000
 map_Kd Maps/fl1.jpg
+map_Bump Maps/fl1_normal.jpg
 
 newmtl default_roof
 Ns 10.0000
@@ -38,6 +39,7 @@ Kd 1 1 1
 Ks 0.0000 0.0000 0.0000
 Ke 0.0000 0.0000 0.0000
 map_Kd Maps/rf1.jpg
+map_Bump Maps/rf1_normal.jpg
 
 newmtl default_doors
 Ns 10.0000
@@ -51,6 +53,7 @@ Kd 1 1 1
 Ks 0.0000 0.0000 0.0000
 Ke 0.0000 0.0000 0.0000
 map_Kd Maps/door_low_4.jpg
+map_Bump Maps/door_low_4_normal.jpg
 
 newmtl default_casttle
 Ns 10.0000
@@ -64,6 +67,7 @@ Kd 1 1 1
 Ks 0.0000 0.0000 0.0000
 Ke 0.0000 0.0000 0.0000
 map_Kd Maps/sd7.jpg
+map_Bump Maps/sd7_normal.jpg
 
 newmtl default_balcony
 Ns 10.0000
@@ -77,6 +81,7 @@ Kd 1 1 1
 Ks 0.0000 0.0000 0.0000
 Ke 0.0000 0.0000 0.0000
 map_Kd Maps/AHB_gold2.jpg
+map_Bump Maps/AHB_gold2_normal.jpg
 
 newmtl default_trunks
 Ns 10.0000
@@ -90,6 +95,7 @@ Kd 1 1 1
 Ks 0.0000 0.0000 0.0000
 Ke 0.0000 0.0000 0.0000
 map_Kd Maps/c5eedf53.jpg
+map_Bump Maps/c5eedf53_normal.jpg
 
 newmtl default_leaves
 Ns 10.0000
@@ -103,4 +109,5 @@ Kd 1 1 1
 Ks 0.0000 0.0000 0.0000
 Ke 0.0000 0.0000 0.0000
 map_Kd Maps/Doc4b2.jpg
+map_Bump Maps/Doc4b2_normal.jpg
 

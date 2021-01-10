@@ -1805,7 +1805,7 @@ typedef struct Mesh {
 					samplerNameStr.str().c_str()), 0);
 
 				break;
-			case aiTextureType_SPECULAR:
+			case aiTextureType_HEIGHT:
 				glActiveTexture(GL_TEXTURE1);
 				glBindTexture(GL_TEXTURE_2D, it->id);
 
@@ -1866,7 +1866,7 @@ typedef struct TextureHelper {
 	static  GLuint load2DTexture(const char* filename, GLint internalFormat = GL_RGBA8,
 		GLenum picFormat = GL_RGBA)
 	{
-
+		printf("filename : %s\n", filename);
 		GLuint textureId = 0;
 		glGenTextures(1, &textureId);
 		glBindTexture(GL_TEXTURE_2D, textureId);
@@ -2138,9 +2138,9 @@ typedef struct Model {
 			this->processMaterial(materialPtr, sceneObjPtr, aiTextureType_DIFFUSE, diffuseTexture);
 			textures.insert(textures.end(), diffuseTexture.begin(), diffuseTexture.end());
 
-			std::vector<Texture> specularTexture;
-			this->processMaterial(materialPtr, sceneObjPtr, aiTextureType_SPECULAR, specularTexture);
-			textures.insert(textures.end(), specularTexture.begin(), specularTexture.end());
+			std::vector<Texture> normalTexture;
+			this->processMaterial(materialPtr, sceneObjPtr, aiTextureType_HEIGHT, normalTexture);
+			textures.insert(textures.end(), normalTexture.begin(), normalTexture.end());
 		}
 		meshObj.setData(vertData, textures, indices);
 		return true;
@@ -2457,6 +2457,7 @@ void SkyboxRendering()
 GLuint terrain_program;
 GLuint tex_displacement;
 GLuint tex_color;
+GLuint tex_normal;
 GLuint terrain_vao;
 
 float dmap_depth;
@@ -2535,6 +2536,17 @@ void Terrain_init()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
+	glActiveTexture(GL_TEXTURE2);
+	texture_data tdata3 = loadImg("terrNormal.png");
+	tdata3.data == NULL ? printf("load terrain normal image fail\n") : printf("load terrain normal image sucessful\n");
+	glGenTextures(1, &tex_normal);
+	glBindTexture(GL_TEXTURE_2D, tex_normal);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, tdata3.width, tdata3.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, tdata3.data);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
 	glPatchParameteri(GL_PATCH_VERTICES, 4);
 
 	//glEnable(GL_CULL_FACE);
@@ -2560,6 +2572,10 @@ void Terrain_rendering()
 	glActiveTexture(GL_TEXTURE1);
 	glBindTexture(GL_TEXTURE_2D, tex_color);
 	glUniform1i(glGetUniformLocation(terrain_program, "tex_color"), 1);
+
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, tex_normal);
+	glUniform1i(glGetUniformLocation(terrain_program, "tex_normal"), 2);
 
 	glUniformMatrix4fv(glGetUniformLocation(terrain_program, "mv_matrix"), 1, GL_FALSE, value_ptr(view * model_matrix));
 	glUniformMatrix4fv(glGetUniformLocation(terrain_program, "proj_matrix"), 1, GL_FALSE, value_ptr(projection));
@@ -2588,8 +2604,11 @@ glm::mat4 lightSpace = lightProj * lightViewing;
 
 
 GLuint lightEffect_switch;
+int lightEffect = 1;
 GLuint normalMap_switch;
+int normalMapEffect = 1;
 GLuint shadowMap_switch;
+int shadowMapEffect = 1;
 
 void initScene() {
 	// Create Shader Program
@@ -2652,6 +2671,10 @@ void renderScene() {
 	projection = scaleOne * projection;
 	glUniformMatrix4fv(um4p, 1, GL_FALSE, value_ptr(projection));
 	glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(ModelView));
+	glUniform1i(lightEffect_switch, lightEffect);
+	glUniform1i(normalMap_switch, normalMapEffect);
+	glUniform1i(shadowMap_switch, shadowMapEffect);
+	
 	glUniformMatrix4fv(glGetUniformLocation(scene_program, "lightSpaceMatrix"), 1, GL_FALSE, value_ptr(lightSpace));
 	glActiveTexture(GL_TEXTURE9);
 	glBindTexture(GL_TEXTURE_2D, depthMap);
@@ -2818,10 +2841,8 @@ void post_render() {
 
 /*-----------------------------------------------SSAO--------------------------------------*/
 
-int lightEffect = 1;
+
 int fogEffect = 0;
-int normalMapEffect = 1;
-int shadowMapEffect = 1;
 int ssaoEffect = 0;
 
 GLuint mainFBO;
@@ -3703,11 +3724,18 @@ void time_function_of_water()
 /*----- Sound Effect -----*/
 
 #include "../Externals/Include/irrKlang/irrKlang.h"
+#include "../Externals/Include/irrKlang/ik_ISoundEngine.h"
+
+string background_music_1 = "background_music_1.mp3";
+string background_music_2 = "background_music_2.mp3";
+
+bool music_switch = false;
+irrklang::ISoundEngine *SoundEngine;
 
 void sound_init()
 {
-	irrklang::ISoundEngine *SoundEngine = irrklang::createIrrKlangDevice();
-	SoundEngine->play2D("gameMusic.mp3", false);
+	SoundEngine = irrklang::createIrrKlangDevice();
+	music_switch ? SoundEngine->play2D(background_music_2.c_str(), true) : SoundEngine->play2D(background_music_1.c_str(), true);
 }
 
 /*----- Sound Effect -----*/
@@ -3932,19 +3960,29 @@ void My_Keyboard(unsigned char key, int x, int y)
 	if (key == 'x' || key == 'X') cameraPos.y -= 5.0f;
 
 	if (key == 'r' || key == 'R') {
-		texture_mode += 1;
-		if (texture_mode == 3) {
-			texture_mode = 0;
-		}
+		normalMapEffect = !normalMapEffect;
+	}
+
+	if (key == 't' || key == 'T') {
+		lightEffect = !lightEffect;
+	}
+
+	if (key == 'y' || key == 'Y') {
+		shadowMapEffect = !shadowMapEffect;
 	}
 
 	if (key == 'q' || key == 'Q') {
 		running_man = !running_man;
 	}
 
-	if (key == 'e' || key == 'E') {
-		fall = SNOW;
+	if (key == 'm' || key == 'M')
+	{
+		music_switch = !music_switch;
+		SoundEngine->stopAllSounds();
+		sound_init();
 	}
+
+	
 }
 
 void My_SpecialKeys(int key, int x, int y)
@@ -4022,6 +4060,15 @@ void My_Menu(int id)
 	case '7':
 		fogEffect = !fogEffect;
 		break;
+	case '8':
+		lightEffect = !lightEffect;
+		break;
+	case '9':
+		shadowMapEffect = !shadowMapEffect;
+		break;
+	case '10':
+		normalMapEffect = !normalMapEffect;
+		break;
 	default:
 		break;
 	}
@@ -4069,6 +4116,9 @@ int main(int argc, char *argv[])
 	glutAddMenuEntry("Sine Wave Distortion", '5');
 	glutAddMenuEntry("SSAO", '6');
 	glutAddMenuEntry("Fog Effect", '7');
+	glutAddMenuEntry("Light Effect", '8');
+	glutAddMenuEntry("ShadowMap Effect", '9');
+	glutAddMenuEntry("Normal Map Effect", '10');
 	glutAddMenuEntry("Exit", MENU_EXIT);
 
 	glutSetMenu(menu_timer);

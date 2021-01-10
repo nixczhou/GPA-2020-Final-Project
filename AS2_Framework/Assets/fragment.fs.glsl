@@ -80,7 +80,8 @@ void main()
 			lightingColor = vec4(texColor, 1.0);
 		}
 	}
-	fragColor = lightingColor = vec4(ambient + (1.0 - shadow) * (diffuse + specular), 1.0);
+	fragColor = lightingColor;
+	//fragColor = vec4(texture(texture_normal0, vertexData.texcoord).rgb, 1.0);
 	fragNormal = normalize(vertexData.viewN);
 	viewSpacePos = viewSpace_coord.xyz;
 }

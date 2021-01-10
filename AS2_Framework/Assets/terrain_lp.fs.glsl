@@ -2,6 +2,7 @@
 
 out vec4 color;
 uniform sampler2D tex_color;
+uniform sampler2D tex_normal;
 uniform bool enable_fog = true;
 uniform vec4 fog_color = vec4(0.7, 0.8, 0.9, 0.0);
 
@@ -25,6 +26,7 @@ vec4 fog(vec4 c)
 void main(void)
 {
 	vec4 landscape = texture(tex_color, fs_in.tc);
+	vec4 normal_landscape = texture(tex_normal, fs_in.tc);
 	if (enable_fog)
 	{
 		color = fog(landscape);
