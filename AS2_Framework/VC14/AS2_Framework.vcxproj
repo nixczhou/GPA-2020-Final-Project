@@ -21,7 +21,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <CharacterSet>Unicode</CharacterSet>
+    <CharacterSet>MultiByte</CharacterSet>
     <PlatformToolset>v141</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -44,6 +44,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
     <LibraryPath>$(SolutionDir)\..\Externals\Libs\VC;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)\..\Externals\Include\fbxsdk;$(SolutionDir)\..\Externals\Include\devil;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -60,6 +61,8 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(ProjectDir)/../Externals/Libs/VC</AdditionalLibraryDirectories>
+      <AdditionalDependencies>irrKlang.lib</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -83,6 +86,8 @@
     <ClCompile Include="..\Source\main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\Assets\depth.fs.glsl" />
+    <None Include="..\Assets\depth.vs.glsl" />
     <None Include="..\Assets\fragment.fs.glsl" />
     <None Include="..\Assets\post_fragment.fs.glsl" />
     <None Include="..\Assets\post_vertex.vs.glsl" />
@@ -93,6 +98,9 @@
     <None Include="..\Assets\toon.fs.glsl" />
     <None Include="..\Assets\toon.vs.glsl" />
     <None Include="..\Assets\vertex.vs.glsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="fbxloader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

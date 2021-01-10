@@ -25,6 +25,8 @@
     #pragma comment (lib, "glew32.lib")
 	#pragma comment(lib, "freeglut.lib")
     #pragma comment(lib, "assimp.lib")
+	#pragma comment(lib, "DevIL.lib")
+	#pragma comment(lib, "libfbxsdk.lib")
 #endif
 
 #define GLM_FORCE_SWIZZLE

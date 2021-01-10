@@ -1,0 +1,71 @@
+#version 430 core
+
+struct WaterColumn
+{
+	float height;
+	float flow;
+};
+
+layout(std430, binding = 0) buffer WaterGridIn
+{
+	WaterColumn columnsIn[];
+};
+
+layout(std430, binding = 1) buffer WaterGridOut
+{
+	WaterColumn columnsOut[];
+};
+
+#define GRID_SIZE 18
+#define ROW_SIZE (GRID_SIZE * gl_NumWorkGroups.x)
+
+layout(local_size_x = GRID_SIZE, local_size_y = GRID_SIZE, local_size_z = 1) in;
+
+void main(void)
+{
+	uint row_size = ROW_SIZE;
+	uint globalIdx = gl_GlobalInvocationID.y * ROW_SIZE + gl_GlobalInvocationID.x;
+	float avg = 0;
+
+	if(gl_GlobalInvocationID.x < row_size - 1)
+	{
+		avg += columnsIn[globalIdx + 1].height;
+	}
+	else
+	{
+		avg += columnsIn[globalIdx].height;
+	}
+
+	if(gl_GlobalInvocationID.x > 0)
+	{
+		avg += columnsIn[globalIdx - 1].height;
+	}
+	else
+	{
+		avg += columnsIn[globalIdx].height;
+	}
+
+	if(gl_GlobalInvocationID.y < row_size - 1)
+	{
+		avg += columnsIn[globalIdx + row_size].height;
+	}
+	else
+	{
+		avg += columnsIn[globalIdx].height;
+	}
+
+	if(gl_GlobalInvocationID.y > 0)
+	{ 
+		avg += columnsIn[globalIdx - row_size].height;
+	}
+	else
+	{
+		avg += columnsIn[globalIdx].height;
+	}
+
+	avg *= 0.25;
+	float flow = (columnsIn[globalIdx].flow + (avg - columnsIn[globalIdx].height) * 2.0) * 0.995;
+
+	columnsOut[globalIdx].flow = flow;
+	columnsOut[globalIdx].height = columnsIn[globalIdx].height + flow;
+}

@@ -1,6 +1,34 @@
 #include "../Externals/Include/Common.h"
+#include "../VC14/fbxloader.h"
 
 #include <ctime>
+#include <cstdio>
+#include <cstdlib>
+#include <IL/il.h>
+#include <vector>
+#include <algorithm>
+#include <fbxsdk.h>
+#include <vector>
+#include <string>
+
+
+
+typedef struct _fbx_handles
+{
+	_fbx_handles()
+	{
+		lSdkManager = NULL;
+		lScene = NULL;
+	}
+
+	FbxManager* lSdkManager;
+	FbxScene* lScene;
+	FbxArray<FbxString*> lAnimStackNameArray;
+} fbx_handles;
+
+void GetFbxAnimation(fbx_handles &handles, std::vector<tinyobj::shape_t> &shapes, float frame);
+bool LoadFbx(fbx_handles &handles, std::vector<tinyobj::shape_t> &shapes, std::vector<tinyobj::material_t> &materials, std::string err, const char* fbxFile);
+void ReleaseFbx(fbx_handles &handles);
 
 #define MENU_TIMER_START 1
 #define MENU_TIMER_STOP 2
@@ -14,6 +42,1594 @@ unsigned int timer_speed = 16;
 
 using namespace glm;
 using namespace std;
+using namespace tinyobj;
+
+#ifdef IOS_REF
+#undef  IOS_REF
+#define IOS_REF (*(pManager->GetIOSettings()))
+#endif
+
+typedef struct
+{
+	std::vector<int> vertexControlIndices; // translate gl_VertexID to control point index
+	std::vector<int> vertexJointIndices; // 4 joints for one vertex
+	std::vector<float> vertexJointWeights; // 4 joint weights for one vertex
+	std::vector<std::vector<float> > jointTransformMatrices; // 16 float column major matrix for each joint for each frame
+	int num_frames;
+} animation_t;
+
+vector<shape_t> gShapes;
+vector<material_t> gMaterials;
+vector<animation_t> gAnimations;
+vector<shape_t> gShapeAnim;
+
+bool LoadScene(FbxManager* pManager, FbxScene* pScene, FbxArray<FbxString*> pAnimStackNameArray, const char* pFilename);
+void LoadCacheRecursive(FbxScene* pScene, FbxNode * pNode, FbxAMatrix& pParentGlobalPosition, FbxTime& pTime);
+void LoadAnimationRecursive(FbxScene* pScene, FbxNode * pNode, FbxAMatrix& pParentGlobalPosition, FbxTime& pTime);
+void InitializeSdkObjects(FbxManager*& pManager, FbxScene*& pScene);
+void DestroySdkObjects(FbxManager* pManager, bool pExitStatus);
+
+void DisplayMetaData(FbxScene* pScene);
+void DisplayHierarchy(FbxScene* pScene);
+void DisplayHierarchy(FbxNode* pNode, int pDepth);
+
+FbxAMatrix GetGlobalPosition(FbxNode* pNode, const FbxTime& pTime, FbxPose* pPose = NULL, FbxAMatrix* pParentGlobalPosition = NULL);
+FbxAMatrix GetPoseMatrix(FbxPose* pPose, int pNodeIndex);
+FbxAMatrix GetGeometry(FbxNode* pNode);
+
+void MatrixScale(FbxAMatrix& pMatrix, double pValue);
+void MatrixAddToDiagonal(FbxAMatrix& pMatrix, double pValue);
+void MatrixAdd(FbxAMatrix& pDstMatrix, FbxAMatrix& pSrcMatrix);
+
+void ComputeSkinDeformation(FbxAMatrix& pGlobalPosition, FbxMesh* pMesh, FbxTime& pTime, FbxVector4* pVertexArray, FbxPose* pPose);
+void ComputeShapeDeformation(FbxMesh* pMesh, FbxTime& pTime, FbxAnimLayer * pAnimLayer, FbxVector4* pVertexArray);
+void ComputeClusterDeformation(FbxAMatrix& pGlobalPosition, FbxMesh* pMesh, FbxCluster* pCluster, FbxAMatrix& pVertexTransformMatrix, FbxTime pTime, FbxPose* pPose);
+
+void GetFbxAnimation(fbx_handles &handles, std::vector<tinyobj::shape_t> &shapes, float frame)
+{
+	if (handles.lScene != 0)
+	{
+		frame = std::min(std::max(frame, 0.0f), 1.0f);
+		FbxTimeSpan lTimeLineTimeSpan;
+		handles.lScene->GetGlobalSettings().GetTimelineDefaultTimeSpan(lTimeLineTimeSpan);
+		FbxTime lTime = lTimeLineTimeSpan.GetStart() + ((lTimeLineTimeSpan.GetStop() - lTimeLineTimeSpan.GetStart()) / 10000) * (10000 * frame);
+		gShapeAnim.clear();
+		FbxAMatrix lDummyGlobalPosition;
+		LoadAnimationRecursive(handles.lScene, handles.lScene->GetRootNode(), lDummyGlobalPosition, lTime);
+		shapes = gShapeAnim;
+	}
+}
+
+bool LoadFbx(fbx_handles &handles, vector<shape_t> &shapes, vector<material_t> &materials, std::string err, const char* pFileName)
+{
+	gShapes.clear();
+	gMaterials.clear();
+	gAnimations.clear();
+
+	bool lResult;
+	InitializeSdkObjects(handles.lSdkManager, handles.lScene);
+	lResult = LoadScene(handles.lSdkManager, handles.lScene, handles.lAnimStackNameArray, pFileName);
+
+	if (lResult == false)
+	{
+		FBXSDK_printf("\n\nAn error occurred while loading the scene...");
+		DestroySdkObjects(handles.lSdkManager, lResult);
+		return false;
+	}
+	else
+	{
+		// Display the scene.
+		// DisplayMetaData(handles.lScene);
+		// FBXSDK_printf("\n\n---------\nHierarchy\n---------\n\n");
+		// DisplayHierarchy(handles.lScene);
+
+		// Load data.
+		FbxAMatrix lDummyGlobalPosition;
+		FbxTimeSpan lTimeLineTimeSpan;
+		handles.lScene->GetGlobalSettings().GetTimelineDefaultTimeSpan(lTimeLineTimeSpan);
+		FbxTime lTime = lTimeLineTimeSpan.GetStart();
+		LoadCacheRecursive(handles.lScene, handles.lScene->GetRootNode(), lDummyGlobalPosition, lTime);
+	}
+
+	shapes = gShapes;
+	materials = gMaterials;
+	return true;
+}
+
+void ReleaseFbx(fbx_handles &handles)
+{
+	if (handles.lScene)
+	{
+		bool lResult;
+		DestroySdkObjects(handles.lSdkManager, lResult);
+		FbxArrayDelete(handles.lAnimStackNameArray);
+		handles.lSdkManager = 0;
+		handles.lScene = 0;
+	}
+}
+
+void DisplayHierarchy(FbxScene* pScene)
+{
+	int i;
+	FbxNode* lRootNode = pScene->GetRootNode();
+
+	for (i = 0; i < lRootNode->GetChildCount(); i++)
+	{
+		DisplayHierarchy(lRootNode->GetChild(i), 0);
+	}
+}
+
+void DisplayHierarchy(FbxNode* pNode, int pDepth)
+{
+	FbxString lString;
+	int i;
+
+	for (i = 0; i < pDepth; i++)
+	{
+		lString += "     ";
+	}
+
+	lString += pNode->GetName();
+	lString += "\n";
+
+	FBXSDK_printf(lString.Buffer());
+
+	for (i = 0; i < pNode->GetChildCount(); i++)
+	{
+		DisplayHierarchy(pNode->GetChild(i), pDepth + 1);
+	}
+}
+
+void InitializeSdkObjects(FbxManager*& pManager, FbxScene*& pScene)
+{
+	//The first thing to do is to create the FBX Manager which is the object allocator for almost all the classes in the SDK
+	pManager = FbxManager::Create();
+	if (!pManager)
+	{
+		FBXSDK_printf("Error: Unable to create FBX Manager!\n");
+		exit(1);
+	}
+	else FBXSDK_printf("Autodesk FBX SDK version %s\n", pManager->GetVersion());
+
+	//Create an IOSettings object. This object holds all import/export settings.
+	FbxIOSettings* ios = FbxIOSettings::Create(pManager, IOSROOT);
+	pManager->SetIOSettings(ios);
+
+	//Load plugins from the executable directory (optional)
+	FbxString lPath = FbxGetApplicationDirectory();
+	pManager->LoadPluginsDirectory(lPath.Buffer());
+
+	//Create an FBX scene. This object holds most objects imported/exported from/to files.
+	pScene = FbxScene::Create(pManager, "My Scene");
+	if (!pScene)
+	{
+		FBXSDK_printf("Error: Unable to create FBX scene!\n");
+		exit(1);
+	}
+}
+
+bool LoadScene(FbxManager* pManager, FbxScene* pScene, FbxArray<FbxString*> pAnimStackNameArray, const char* pFilename)
+{
+	int lFileMajor, lFileMinor, lFileRevision;
+	int lSDKMajor, lSDKMinor, lSDKRevision;
+	int i, lAnimStackCount;
+	bool lStatus;
+	char lPassword[1024];
+
+	// Get the file version number generate by the FBX SDK.
+	FbxManager::GetFileFormatVersion(lSDKMajor, lSDKMinor, lSDKRevision);
+
+	// Create an importer.
+	FbxImporter* lImporter = FbxImporter::Create(pManager, "");
+
+	// Initialize the importer by providing a filename.
+	const bool lImportStatus = lImporter->Initialize(pFilename, -1, pManager->GetIOSettings());
+	lImporter->GetFileVersion(lFileMajor, lFileMinor, lFileRevision);
+
+	if (!lImportStatus)
+	{
+		FbxString error = lImporter->GetStatus().GetErrorString();
+		FBXSDK_printf("Call to FbxImporter::Initialize() failed.\n");
+		FBXSDK_printf("Error returned: %s\n\n", error.Buffer());
+
+		if (lImporter->GetStatus().GetCode() == FbxStatus::eInvalidFileVersion)
+		{
+			FBXSDK_printf("FBX file format version for this FBX SDK is %d.%d.%d\n", lSDKMajor, lSDKMinor, lSDKRevision);
+			FBXSDK_printf("FBX file format version for file '%s' is %d.%d.%d\n\n", pFilename, lFileMajor, lFileMinor, lFileRevision);
+		}
+
+		return false;
+	}
+
+	FBXSDK_printf("FBX file format version for this FBX SDK is %d.%d.%d\n", lSDKMajor, lSDKMinor, lSDKRevision);
+
+	if (lImporter->IsFBX())
+	{
+		FBXSDK_printf("FBX file format version for file '%s' is %d.%d.%d\n\n", pFilename, lFileMajor, lFileMinor, lFileRevision);
+
+		// From this point, it is possible to access animation stack information without
+		// the expense of loading the entire file.
+
+		FBXSDK_printf("Animation Stack Information\n");
+
+		lAnimStackCount = lImporter->GetAnimStackCount();
+
+		FBXSDK_printf("    Number of Animation Stacks: %d\n", lAnimStackCount);
+		FBXSDK_printf("    Current Animation Stack: \"%s\"\n", lImporter->GetActiveAnimStackName().Buffer());
+		FBXSDK_printf("\n");
+
+		for (i = 0; i < lAnimStackCount; i++)
+		{
+			FbxTakeInfo* lTakeInfo = lImporter->GetTakeInfo(i);
+
+			FBXSDK_printf("    Animation Stack %d\n", i);
+			FBXSDK_printf("         Name: \"%s\"\n", lTakeInfo->mName.Buffer());
+			FBXSDK_printf("         Description: \"%s\"\n", lTakeInfo->mDescription.Buffer());
+
+			// Change the value of the import name if the animation stack should be imported 
+			// under a different name.
+			FBXSDK_printf("         Import Name: \"%s\"\n", lTakeInfo->mImportName.Buffer());
+
+			// Set the value of the import state to false if the animation stack should be not
+			// be imported. 
+			FBXSDK_printf("         Import State: %s\n", lTakeInfo->mSelect ? "true" : "false");
+			FBXSDK_printf("\n");
+		}
+	}
+
+	// Import the scene.
+	lStatus = lImporter->Import(pScene);
+
+	if (lStatus == false && lImporter->GetStatus().GetCode() == FbxStatus::ePasswordError)
+	{
+		FBXSDK_printf("Please enter password: ");
+
+		lPassword[0] = '\0';
+
+		FBXSDK_CRT_SECURE_NO_WARNING_BEGIN
+			scanf("%s", lPassword);
+		FBXSDK_CRT_SECURE_NO_WARNING_END
+
+			FbxString lString(lPassword);
+
+		IOS_REF.SetStringProp(IMP_FBX_PASSWORD, lString);
+		IOS_REF.SetBoolProp(IMP_FBX_PASSWORD_ENABLE, true);
+
+		lStatus = lImporter->Import(pScene);
+
+		if (lStatus == false && lImporter->GetStatus().GetCode() == FbxStatus::ePasswordError)
+		{
+			FBXSDK_printf("\nPassword is wrong, import aborted.\n");
+		}
+	}
+
+	if (lStatus)
+	{
+		// Convert Axis System to up = Y Axis, Right-Handed Coordinate (OpenGL Style)
+		FbxAxisSystem SceneAxisSystem = pScene->GetGlobalSettings().GetAxisSystem();
+		FbxAxisSystem OurAxisSystem(FbxAxisSystem::eYAxis, FbxAxisSystem::eParityOdd, FbxAxisSystem::eRightHanded);
+		if (SceneAxisSystem != OurAxisSystem)
+		{
+			OurAxisSystem.ConvertScene(pScene);
+		}
+
+		// Convert Unit System to what is used in this example, if needed
+		FbxSystemUnit SceneSystemUnit = pScene->GetGlobalSettings().GetSystemUnit();
+		if (SceneSystemUnit.GetScaleFactor() != 100.0)
+		{
+			//The unit in this example is centimeter.
+			FbxSystemUnit::m.ConvertScene(pScene);
+		}
+
+		// Get the list of all the animation stack.
+		pScene->FillAnimStackNameArray(pAnimStackNameArray);
+
+		// Convert mesh, NURBS and patch into triangle mesh
+		FbxGeometryConverter lGeomConverter(pManager);
+		lGeomConverter.Triangulate(pScene, true);
+	}
+
+	// Destroy the importer.
+	lImporter->Destroy();
+
+	return lStatus;
+}
+
+void DestroySdkObjects(FbxManager* pManager, bool pExitStatus)
+{
+	//Delete the FBX Manager. All the objects that have been allocated using the FBX Manager and that haven't been explicitly destroyed are also automatically destroyed.
+	if (pManager) pManager->Destroy();
+	if (pExitStatus) FBXSDK_printf("Program Success!\n");
+}
+
+void DisplayMetaData(FbxScene* pScene)
+{
+	FbxDocumentInfo* sceneInfo = pScene->GetSceneInfo();
+	if (sceneInfo)
+	{
+		FBXSDK_printf("\n\n--------------------\nMeta-Data\n--------------------\n\n");
+		FBXSDK_printf("    Title: %s\n", sceneInfo->mTitle.Buffer());
+		FBXSDK_printf("    Subject: %s\n", sceneInfo->mSubject.Buffer());
+		FBXSDK_printf("    Author: %s\n", sceneInfo->mAuthor.Buffer());
+		FBXSDK_printf("    Keywords: %s\n", sceneInfo->mKeywords.Buffer());
+		FBXSDK_printf("    Revision: %s\n", sceneInfo->mRevision.Buffer());
+		FBXSDK_printf("    Comment: %s\n", sceneInfo->mComment.Buffer());
+
+		FbxThumbnail* thumbnail = sceneInfo->GetSceneThumbnail();
+		if (thumbnail)
+		{
+			FBXSDK_printf("    Thumbnail:\n");
+
+			switch (thumbnail->GetDataFormat())
+			{
+			case FbxThumbnail::eRGB_24:
+				FBXSDK_printf("        Format: RGB\n");
+				break;
+			case FbxThumbnail::eRGBA_32:
+				FBXSDK_printf("        Format: RGBA\n");
+				break;
+			}
+
+			switch (thumbnail->GetSize())
+			{
+			default:
+				break;
+			case FbxThumbnail::eNotSet:
+				FBXSDK_printf("        Size: no dimensions specified (%ld bytes)\n", thumbnail->GetSizeInBytes());
+				break;
+			case FbxThumbnail::e64x64:
+				FBXSDK_printf("        Size: 64 x 64 pixels (%ld bytes)\n", thumbnail->GetSizeInBytes());
+				break;
+			case FbxThumbnail::e128x128:
+				FBXSDK_printf("        Size: 128 x 128 pixels (%ld bytes)\n", thumbnail->GetSizeInBytes());
+			}
+		}
+	}
+}
+
+// Get specific property value and connected texture if any.
+// Value = Property value * Factor property value (if no factor property, multiply by 1).
+FbxDouble3 GetMaterialProperty(const FbxSurfaceMaterial * pMaterial,
+	const char * pPropertyName,
+	const char * pFactorPropertyName,
+	string & pTextureName)
+{
+	FbxDouble3 lResult(0, 0, 0);
+	const FbxProperty lProperty = pMaterial->FindProperty(pPropertyName);
+	const FbxProperty lFactorProperty = pMaterial->FindProperty(pFactorPropertyName);
+	if (lProperty.IsValid() && lFactorProperty.IsValid())
+	{
+		lResult = lProperty.Get<FbxDouble3>();
+		double lFactor = lFactorProperty.Get<FbxDouble>();
+		if (lFactor != 1)
+		{
+			lResult[0] *= lFactor;
+			lResult[1] *= lFactor;
+			lResult[2] *= lFactor;
+		}
+	}
+
+	if (lProperty.IsValid())
+	{
+		const int lTextureCount = lProperty.GetSrcObjectCount<FbxFileTexture>();
+		if (lTextureCount)
+		{
+			const FbxFileTexture* lTexture = lProperty.GetSrcObject<FbxFileTexture>();
+			if (lTexture)
+			{
+				pTextureName = lTexture->GetFileName();
+			}
+		}
+	}
+
+	return lResult;
+}
+
+void LoadAnimationRecursive(FbxScene* pScene, FbxNode *pNode, FbxAMatrix& pParentGlobalPosition, FbxTime& pTime)
+{
+	FbxAMatrix lGlobalPosition = GetGlobalPosition(pNode, pTime, 0, &pParentGlobalPosition);
+	const int lMaterialCount = pNode->GetMaterialCount();
+	FbxNodeAttribute* lNodeAttribute = pNode->GetNodeAttribute();
+	if (lNodeAttribute)
+	{
+		// Bake mesh as VBO(vertex buffer object) into GPU.
+		if (lNodeAttribute->GetAttributeType() == FbxNodeAttribute::eMesh)
+		{
+			FbxMesh * lMesh = pNode->GetMesh();
+			if (lMesh)
+			{
+				const int lPolygonCount = lMesh->GetPolygonCount();
+				bool lAllByControlPoint = true; // => true: glDrawElements / false: glDrawArrays
+
+												// Count the polygon count of each material
+				FbxLayerElementArrayTemplate<int>* lMaterialIndice = NULL;
+				FbxGeometryElement::EMappingMode lMaterialMappingMode = FbxGeometryElement::eNone;
+				if (lMesh->GetElementMaterial())
+				{
+					lMaterialIndice = &lMesh->GetElementMaterial()->GetIndexArray();
+					lMaterialMappingMode = lMesh->GetElementMaterial()->GetMappingMode();
+				}
+
+				// Congregate all the data of a mesh to be cached in VBOs.
+				// If normal or UV is by polygon vertex, record all vertex attributes by polygon vertex.
+				bool lHasNormal = lMesh->GetElementNormalCount() > 0;
+				bool lHasUV = lMesh->GetElementUVCount() > 0;
+				FbxGeometryElement::EMappingMode lNormalMappingMode = FbxGeometryElement::eNone;
+				FbxGeometryElement::EMappingMode lUVMappingMode = FbxGeometryElement::eNone;
+				if (lHasNormal)
+				{
+					lNormalMappingMode = lMesh->GetElementNormal(0)->GetMappingMode();
+					if (lNormalMappingMode == FbxGeometryElement::eNone)
+					{
+						lHasNormal = false;
+					}
+					if (lHasNormal && lNormalMappingMode != FbxGeometryElement::eByControlPoint)
+					{
+						lAllByControlPoint = false;
+					}
+				}
+				if (lHasUV)
+				{
+					lUVMappingMode = lMesh->GetElementUV(0)->GetMappingMode();
+					if (lUVMappingMode == FbxGeometryElement::eNone)
+					{
+						lHasUV = false;
+					}
+					if (lHasUV && lUVMappingMode != FbxGeometryElement::eByControlPoint)
+					{
+						lAllByControlPoint = false;
+					}
+				}
+
+				// Allocate the array memory, by control point or by polygon vertex.
+				int lPolygonVertexCount = lMesh->GetControlPointsCount();
+				if (!lAllByControlPoint)
+				{
+					lPolygonVertexCount = lPolygonCount * 3;
+				}
+				vector<float> lVertices;
+				lVertices.resize(lPolygonVertexCount * 3);
+				vector<unsigned int> lIndices;
+				lIndices.resize(lPolygonCount * 3);
+
+				// Populate the array with vertex attribute, if by control point.
+				FbxVector4 * lControlPoints = lMesh->GetControlPoints();
+				/////////////////////////
+				if ((FbxSkin *)lMesh->GetDeformer(0, FbxDeformer::eSkin) != 0)
+				{
+					lControlPoints = new FbxVector4[lMesh->GetControlPointsCount()];
+					memcpy(lControlPoints, lMesh->GetControlPoints(), lMesh->GetControlPointsCount() * sizeof(FbxVector4));
+
+					// select the base layer from the animation stack
+					FbxAnimStack * lCurrentAnimationStack = pScene->GetSrcObject<FbxAnimStack>(0);
+					// we assume that the first animation layer connected to the animation stack is the base layer
+					// (this is the assumption made in the FBXSDK)
+					FbxAnimLayer *mCurrentAnimLayer = lCurrentAnimationStack->GetMember<FbxAnimLayer>();
+
+					// ComputeShapeDeformation(lMesh, pTime, mCurrentAnimLayer, lControlPoints);
+					FbxAMatrix lGeometryOffset = GetGeometry(pNode);
+					FbxAMatrix lGlobalOffPosition = lGlobalPosition * lGeometryOffset;
+					ComputeSkinDeformation(lGlobalOffPosition, lMesh, pTime, lControlPoints, NULL);
+				}
+				/////////////////////////
+				vector<int> vertexControlIndices;
+				FbxVector4 lCurrentVertex;
+				FbxVector4 lCurrentNormal;
+				FbxVector2 lCurrentUV;
+				if (lAllByControlPoint)
+				{
+					for (int lIndex = 0; lIndex < lPolygonVertexCount; ++lIndex)
+					{
+						// Save the vertex position.
+						lCurrentVertex = lControlPoints[lIndex];
+						lVertices[lIndex * 3] = static_cast<float>(lCurrentVertex[0]);
+						lVertices[lIndex * 3 + 1] = static_cast<float>(lCurrentVertex[1]);
+						lVertices[lIndex * 3 + 2] = static_cast<float>(lCurrentVertex[2]);
+						vertexControlIndices.push_back(lIndex);
+					}
+
+				}
+
+				int lVertexCount = 0;
+				for (int lPolygonIndex = 0; lPolygonIndex < lPolygonCount; ++lPolygonIndex)
+				{
+					for (int lVerticeIndex = 0; lVerticeIndex < 3; ++lVerticeIndex)
+					{
+						const int lControlPointIndex = lMesh->GetPolygonVertex(lPolygonIndex, lVerticeIndex);
+
+						if (lAllByControlPoint)
+						{
+							lIndices[lPolygonIndex * 3 + lVerticeIndex] = static_cast<unsigned int>(lControlPointIndex);
+						}
+						// Populate the array with vertex attribute, if by polygon vertex.
+						else
+						{
+							lIndices[lPolygonIndex * 3 + lVerticeIndex] = static_cast<unsigned int>(lVertexCount);
+
+							lCurrentVertex = lControlPoints[lControlPointIndex];
+							lVertices[lVertexCount * 3] = static_cast<float>(lCurrentVertex[0]);
+							lVertices[lVertexCount * 3 + 1] = static_cast<float>(lCurrentVertex[1]);
+							lVertices[lVertexCount * 3 + 2] = static_cast<float>(lCurrentVertex[2]);
+							vertexControlIndices.push_back(lControlPointIndex);
+						}
+						++lVertexCount;
+					}
+				}
+				shape_t shape;
+				shape.mesh.positions = lVertices;
+				gShapeAnim.push_back(shape);
+
+				if ((FbxSkin *)lMesh->GetDeformer(0, FbxDeformer::eSkin) != 0)
+				{
+					delete[] lControlPoints;
+				}
+			}
+		}
+	}
+
+	const int lChildCount = pNode->GetChildCount();
+	for (int lChildIndex = 0; lChildIndex < lChildCount; ++lChildIndex)
+	{
+		LoadAnimationRecursive(pScene, pNode->GetChild(lChildIndex), lGlobalPosition, pTime);
+	}
+}
+
+void LoadMaterials(FbxNode *pNode)
+{
+	// Bake material and hook as user data.
+	int lMaterialIndexBase = gMaterials.size();
+	const int lMaterialCount = pNode->GetMaterialCount();
+	for (int lMaterialIndex = 0; lMaterialIndex < lMaterialCount; ++lMaterialIndex)
+	{
+		FbxSurfaceMaterial * lMaterial = pNode->GetMaterial(lMaterialIndex);
+		material_t material;
+		if (lMaterial)
+		{
+			string lTextureNameTemp;
+			const FbxDouble3 lAmbient = GetMaterialProperty(lMaterial,
+				FbxSurfaceMaterial::sAmbient, FbxSurfaceMaterial::sAmbientFactor, lTextureNameTemp);
+			material.ambient[0] = static_cast<GLfloat>(lAmbient[0]);
+			material.ambient[1] = static_cast<GLfloat>(lAmbient[1]);
+			material.ambient[2] = static_cast<GLfloat>(lAmbient[2]);
+			material.ambient_texname = lTextureNameTemp;
+
+			const FbxDouble3 lDiffuse = GetMaterialProperty(lMaterial,
+				FbxSurfaceMaterial::sDiffuse, FbxSurfaceMaterial::sDiffuseFactor, lTextureNameTemp);
+			material.diffuse[0] = static_cast<GLfloat>(lDiffuse[0]);
+			material.diffuse[1] = static_cast<GLfloat>(lDiffuse[1]);
+			material.diffuse[2] = static_cast<GLfloat>(lDiffuse[2]);
+			material.diffuse_texname = lTextureNameTemp;
+
+			const FbxDouble3 lSpecular = GetMaterialProperty(lMaterial,
+				FbxSurfaceMaterial::sSpecular, FbxSurfaceMaterial::sSpecularFactor, lTextureNameTemp);
+			material.specular[0] = static_cast<GLfloat>(lSpecular[0]);
+			material.specular[1] = static_cast<GLfloat>(lSpecular[1]);
+			material.specular[2] = static_cast<GLfloat>(lSpecular[2]);
+			material.specular_texname = lTextureNameTemp;
+
+			FbxProperty lShininessProperty = lMaterial->FindProperty(FbxSurfaceMaterial::sShininess);
+			if (lShininessProperty.IsValid())
+			{
+				double lShininess = lShininessProperty.Get<FbxDouble>();
+				material.shininess = static_cast<GLfloat>(lShininess);
+			}
+		}
+		gMaterials.push_back(material);
+	}
+}
+
+void LoadCacheRecursive(FbxScene* pScene, FbxNode * pNode, FbxAMatrix& pParentGlobalPosition, FbxTime& pTime)
+{
+	FbxAMatrix lGlobalPosition = GetGlobalPosition(pNode, pTime, 0, &pParentGlobalPosition);
+	// Bake material and hook as user data.
+	int lMaterialIndexBase = gMaterials.size();
+	LoadMaterials(pNode);
+
+	FbxNodeAttribute* lNodeAttribute = pNode->GetNodeAttribute();
+	if (lNodeAttribute)
+	{
+		// Bake mesh as VBO(vertex buffer object) into GPU.
+		if (lNodeAttribute->GetAttributeType() == FbxNodeAttribute::eMesh)
+		{
+			FbxMesh * lMesh = pNode->GetMesh();
+			if (lMesh)
+			{
+				const int lPolygonCount = lMesh->GetPolygonCount();
+				bool lAllByControlPoint = true; // => true: glDrawElements / false: glDrawArrays
+
+				// Count the polygon count of each material
+				FbxLayerElementArrayTemplate<int>* lMaterialIndice = NULL;
+				FbxGeometryElement::EMappingMode lMaterialMappingMode = FbxGeometryElement::eNone;
+				if (lMesh->GetElementMaterial())
+				{
+					lMaterialIndice = &lMesh->GetElementMaterial()->GetIndexArray();
+					lMaterialMappingMode = lMesh->GetElementMaterial()->GetMappingMode();
+				}
+
+				// Congregate all the data of a mesh to be cached in VBOs.
+				// If normal or UV is by polygon vertex, record all vertex attributes by polygon vertex.
+				bool lHasNormal = lMesh->GetElementNormalCount() > 0;
+				bool lHasUV = lMesh->GetElementUVCount() > 0;
+				FbxGeometryElement::EMappingMode lNormalMappingMode = FbxGeometryElement::eNone;
+				FbxGeometryElement::EMappingMode lUVMappingMode = FbxGeometryElement::eNone;
+				if (lHasNormal)
+				{
+					lNormalMappingMode = lMesh->GetElementNormal(0)->GetMappingMode();
+					if (lNormalMappingMode == FbxGeometryElement::eNone)
+					{
+						lHasNormal = false;
+					}
+					if (lHasNormal && lNormalMappingMode != FbxGeometryElement::eByControlPoint)
+					{
+						lAllByControlPoint = false;
+					}
+				}
+				if (lHasUV)
+				{
+					lUVMappingMode = lMesh->GetElementUV(0)->GetMappingMode();
+					if (lUVMappingMode == FbxGeometryElement::eNone)
+					{
+						lHasUV = false;
+					}
+					if (lHasUV && lUVMappingMode != FbxGeometryElement::eByControlPoint)
+					{
+						lAllByControlPoint = false;
+					}
+				}
+
+				// Allocate the array memory, by control point or by polygon vertex.
+				int lPolygonVertexCount = lMesh->GetControlPointsCount();
+				if (!lAllByControlPoint)
+				{
+					lPolygonVertexCount = lPolygonCount * 3;
+				}
+				printf("All By Control Point: %s\n", lAllByControlPoint ? "Yes" : "No");
+				vector<float> lVertices;
+				lVertices.resize(lPolygonVertexCount * 3);
+				vector<unsigned int> lIndices;
+				lIndices.resize(lPolygonCount * 3);
+				vector<float> lNormals;
+				if (lHasNormal)
+				{
+					lNormals.resize(lPolygonVertexCount * 3);
+				}
+				vector<float> lUVs;
+				FbxStringList lUVNames;
+				lMesh->GetUVSetNames(lUVNames);
+				const char * lUVName = NULL;
+				if (lHasUV && lUVNames.GetCount())
+				{
+					lUVs.resize(lPolygonVertexCount * 2);
+					lUVName = lUVNames[0];
+				}
+
+				// Populate the array with vertex attribute, if by control point.
+				FbxVector4 * lControlPoints = lMesh->GetControlPoints();
+				/////////////////////////
+				if ((FbxSkin *)lMesh->GetDeformer(0, FbxDeformer::eSkin) != 0)
+				{
+					lControlPoints = new FbxVector4[lMesh->GetControlPointsCount()];
+					memcpy(lControlPoints, lMesh->GetControlPoints(), lMesh->GetControlPointsCount() * sizeof(FbxVector4));
+
+					FbxTimeSpan lTimeLineTimeSpan;
+					pScene->GetGlobalSettings().GetTimelineDefaultTimeSpan(lTimeLineTimeSpan);
+					FbxTime pTime = lTimeLineTimeSpan.GetStart();
+
+					// select the base layer from the animation stack
+					FbxAnimStack * lCurrentAnimationStack = pScene->GetSrcObject<FbxAnimStack>(0);
+					// we assume that the first animation layer connected to the animation stack is the base layer
+					// (this is the assumption made in the FBXSDK)
+					FbxAnimLayer *mCurrentAnimLayer = lCurrentAnimationStack->GetMember<FbxAnimLayer>();
+
+					// ComputeShapeDeformation(lMesh, pTime, mCurrentAnimLayer, lControlPoints);
+					FbxAMatrix lGeometryOffset = GetGeometry(pNode);
+					FbxAMatrix lGlobalOffPosition = lGlobalPosition * lGeometryOffset;
+					ComputeSkinDeformation(lGlobalOffPosition, lMesh, pTime, lControlPoints, NULL);
+				}
+				/////////////////////////
+				vector<int> lMaterialIndices;
+				lMaterialIndices.resize(lPolygonVertexCount);
+				vector<int> vertexControlIndices;
+				FbxVector4 lCurrentVertex;
+				FbxVector4 lCurrentNormal;
+				FbxVector2 lCurrentUV;
+				if (lAllByControlPoint)
+				{
+					const FbxGeometryElementNormal * lNormalElement = NULL;
+					const FbxGeometryElementUV * lUVElement = NULL;
+					if (lHasNormal)
+					{
+						lNormalElement = lMesh->GetElementNormal(0);
+					}
+					if (lHasUV)
+					{
+						lUVElement = lMesh->GetElementUV(0);
+					}
+					for (int lIndex = 0; lIndex < lPolygonVertexCount; ++lIndex)
+					{
+						// The material for current face.
+						int lMaterialIndex = 0;
+						if (lMaterialIndice && lMaterialMappingMode == FbxGeometryElement::eByPolygon)
+						{
+							lMaterialIndex = lMaterialIndice->GetAt(lIndex);
+						}
+						// Save the vertex position.
+						lCurrentVertex = lControlPoints[lIndex];
+						lVertices[lIndex * 3] = static_cast<float>(lCurrentVertex[0]);
+						lVertices[lIndex * 3 + 1] = static_cast<float>(lCurrentVertex[1]);
+						lVertices[lIndex * 3 + 2] = static_cast<float>(lCurrentVertex[2]);
+						lMaterialIndices[lIndex] = lMaterialIndex + lMaterialIndexBase;
+						vertexControlIndices.push_back(lIndex);
+
+						// Save the normal.
+						if (lHasNormal)
+						{
+							int lNormalIndex = lIndex;
+							if (lNormalElement->GetReferenceMode() == FbxLayerElement::eIndexToDirect)
+							{
+								lNormalIndex = lNormalElement->GetIndexArray().GetAt(lIndex);
+							}
+							lCurrentNormal = lNormalElement->GetDirectArray().GetAt(lNormalIndex);
+							lNormals[lIndex * 3] = static_cast<float>(lCurrentNormal[0]);
+							lNormals[lIndex * 3 + 1] = static_cast<float>(lCurrentNormal[1]);
+							lNormals[lIndex * 3 + 2] = static_cast<float>(lCurrentNormal[2]);
+						}
+
+						// Save the UV.
+						if (lHasUV)
+						{
+							int lUVIndex = lIndex;
+							if (lUVElement->GetReferenceMode() == FbxLayerElement::eIndexToDirect)
+							{
+								lUVIndex = lUVElement->GetIndexArray().GetAt(lIndex);
+							}
+							lCurrentUV = lUVElement->GetDirectArray().GetAt(lUVIndex);
+							lUVs[lIndex * 2] = static_cast<float>(lCurrentUV[0]);
+							lUVs[lIndex * 2 + 1] = static_cast<float>(lCurrentUV[1]);
+						}
+					}
+
+				}
+
+				int lVertexCount = 0;
+				for (int lPolygonIndex = 0; lPolygonIndex < lPolygonCount; ++lPolygonIndex)
+				{
+					// The material for current face.
+					int lMaterialIndex = 0;
+					if (lMaterialIndice && lMaterialMappingMode == FbxGeometryElement::eByPolygon)
+					{
+						lMaterialIndex = lMaterialIndice->GetAt(lPolygonIndex);
+					}
+					if (lMaterialIndex != 0)
+					{
+						int i = 0;
+					}
+
+					for (int lVerticeIndex = 0; lVerticeIndex < 3; ++lVerticeIndex)
+					{
+						const int lControlPointIndex = lMesh->GetPolygonVertex(lPolygonIndex, lVerticeIndex);
+
+						if (lAllByControlPoint)
+						{
+							lIndices[lPolygonIndex * 3 + lVerticeIndex] = static_cast<unsigned int>(lControlPointIndex);
+						}
+						// Populate the array with vertex attribute, if by polygon vertex.
+						else
+						{
+							lIndices[lPolygonIndex * 3 + lVerticeIndex] = static_cast<unsigned int>(lVertexCount);
+
+							lCurrentVertex = lControlPoints[lControlPointIndex];
+							lVertices[lVertexCount * 3] = static_cast<float>(lCurrentVertex[0]);
+							lVertices[lVertexCount * 3 + 1] = static_cast<float>(lCurrentVertex[1]);
+							lVertices[lVertexCount * 3 + 2] = static_cast<float>(lCurrentVertex[2]);
+							lMaterialIndices[lVertexCount] = lMaterialIndex + lMaterialIndexBase;
+							vertexControlIndices.push_back(lControlPointIndex);
+
+							if (lHasNormal)
+							{
+								lMesh->GetPolygonVertexNormal(lPolygonIndex, lVerticeIndex, lCurrentNormal);
+								lNormals[lVertexCount * 3] = static_cast<float>(lCurrentNormal[0]);
+								lNormals[lVertexCount * 3 + 1] = static_cast<float>(lCurrentNormal[1]);
+								lNormals[lVertexCount * 3 + 2] = static_cast<float>(lCurrentNormal[2]);
+							}
+
+							if (lHasUV)
+							{
+								bool lUnmappedUV;
+								lMesh->GetPolygonVertexUV(lPolygonIndex, lVerticeIndex, lUVName, lCurrentUV, lUnmappedUV);
+								lUVs[lVertexCount * 2] = static_cast<float>(lCurrentUV[0]);
+								lUVs[lVertexCount * 2 + 1] = static_cast<float>(lCurrentUV[1]);
+							}
+						}
+						++lVertexCount;
+					}
+				}
+				shape_t shape;
+				shape.mesh.indices = lIndices;
+				shape.mesh.material_ids = lMaterialIndices;
+				shape.mesh.positions = lVertices;
+				shape.mesh.normals = lNormals;
+				shape.mesh.texcoords = lUVs;
+				gShapes.push_back(shape);
+
+				if ((FbxSkin *)lMesh->GetDeformer(0, FbxDeformer::eSkin) != 0)
+				{
+					delete[] lControlPoints;
+				}
+				/*
+				// For all skins and all clusters, accumulate their deformation and weight
+				// on each vertices and store them in lClusterDeformation and lClusterWeight.
+				vector<int> vertexJointIndices;
+				vertexJointIndices.resize(lMesh->GetControlPointsCount() * 4, -1);
+				vector<float> vertexJointWeights;
+				vertexJointWeights.resize(lMesh->GetControlPointsCount() * 4, -1);
+				vector<vector<float> > jointTransformMatrices;
+				int num_frames;
+
+				FbxTimeSpan lTimeLineTimeSpan;
+				pScene->GetGlobalSettings().GetTimelineDefaultTimeSpan(lTimeLineTimeSpan);
+				FbxTime lStartTime = lTimeLineTimeSpan.GetStart();
+				FbxTime lEndTime = lTimeLineTimeSpan.GetStop();
+				FbxTime lStepTime = (lEndTime - lStartTime) / 100;
+				// select the base layer from the animation stack
+				FbxAnimStack * lCurrentAnimationStack = pScene->GetSrcObject<FbxAnimStack>(0);
+				// we assume that the first animation layer connected to the animation stack is the base layer
+				// (this is the assumption made in the FBXSDK)
+				FbxAnimLayer *lCurrentAnimLayer = lCurrentAnimationStack->GetMember<FbxAnimLayer>();
+				int lSkinCount = lMesh->GetDeformerCount(FbxDeformer::eSkin);
+				for (int lSkinIndex = 0; lSkinIndex < lSkinCount && lSkinIndex < 1; ++lSkinIndex)
+				{
+					FbxSkin * lSkinDeformer = (FbxSkin *)lMesh->GetDeformer(lSkinIndex, FbxDeformer::eSkin);
+					int lClusterCount = lSkinDeformer->GetClusterCount();
+					for (int lClusterIndex = 0; lClusterIndex < lClusterCount; ++lClusterIndex)
+					{
+						FbxCluster* lCluster = lSkinDeformer->GetCluster(lClusterIndex);
+						if (!lCluster->GetLink())
+							continue;
+
+						FbxAMatrix globalPosition = FbxAMatrix(FbxVector4(0, 0, 0, 1), FbxVector4(0, 0, 0, 0), FbxVector4(1, 1, 1, 1));
+
+						num_frames = 0;
+						vector<float> OneJointTransformMatrices;
+						for (FbxTime lTime = lStartTime; lTime < lEndTime; lTime += lStepTime)
+						{
+							FbxAMatrix lVertexTransformMatrix;
+							ComputeClusterDeformation(globalPosition, lMesh, lCluster, lVertexTransformMatrix, lTime, 0);
+							for (int n = 0; n < 16; n++)
+							{
+								OneJointTransformMatrices.push_back(*((double*)(lVertexTransformMatrix) + n));
+							}
+							num_frames++;
+						}
+						jointTransformMatrices.push_back(OneJointTransformMatrices);
+
+						int lVertexIndexCount = lCluster->GetControlPointIndicesCount();
+						for (int k = 0; k < lVertexIndexCount; ++k)
+						{
+							int lIndex = lCluster->GetControlPointIndices()[k];
+							// Sometimes, the mesh can have less points than at the time of the skinning
+							// because a smooth operator was active when skinning but has been deactivated during export.
+							if (lIndex >= lVertexCount)
+								continue;
+							double lWeight = lCluster->GetControlPointWeights()[k];
+							if (lWeight == 0.0)
+							{
+								continue;
+							}
+							int m = 0;
+							while (m < 4 && vertexJointIndices[lIndex * 4 + m] != -1)
+							{
+								m++;
+							}
+							if (m != 4)
+							{
+								vertexJointIndices[lIndex * 4 + m] = lClusterIndex;
+								vertexJointWeights[lIndex * 4 + m] = (float) lWeight;
+							}
+						} //For each vertex
+
+					} //lClusterCount
+				}
+				animation_t animation;
+				animation.vertexJointIndices = vertexJointIndices;
+				animation.vertexJointWeights = vertexJointWeights;
+				animation.jointTransformMatrices = jointTransformMatrices;
+				animation.num_frames = num_frames;
+				animation.vertexControlIndices = vertexControlIndices;
+				gAnimations.push_back(animation);
+				*/
+			}
+		}
+	}
+
+	const int lChildCount = pNode->GetChildCount();
+	for (int lChildIndex = 0; lChildIndex < lChildCount; ++lChildIndex)
+	{
+		LoadCacheRecursive(pScene, pNode->GetChild(lChildIndex), lGlobalPosition, pTime);
+	}
+}
+
+// Deform the vertex array with the shapes contained in the mesh.
+void ComputeShapeDeformation(FbxMesh* pMesh, FbxTime& pTime, FbxAnimLayer * pAnimLayer, FbxVector4* pVertexArray)
+{
+	int lVertexCount = pMesh->GetControlPointsCount();
+
+	FbxVector4* lSrcVertexArray = pVertexArray;
+	FbxVector4* lDstVertexArray = new FbxVector4[lVertexCount];
+	memcpy(lDstVertexArray, pVertexArray, lVertexCount * sizeof(FbxVector4));
+
+	int lBlendShapeDeformerCount = pMesh->GetDeformerCount(FbxDeformer::eBlendShape);
+	for (int lBlendShapeIndex = 0; lBlendShapeIndex < lBlendShapeDeformerCount; ++lBlendShapeIndex)
+	{
+		FbxBlendShape* lBlendShape = (FbxBlendShape*)pMesh->GetDeformer(lBlendShapeIndex, FbxDeformer::eBlendShape);
+
+		int lBlendShapeChannelCount = lBlendShape->GetBlendShapeChannelCount();
+		for (int lChannelIndex = 0; lChannelIndex < lBlendShapeChannelCount; ++lChannelIndex)
+		{
+			FbxBlendShapeChannel* lChannel = lBlendShape->GetBlendShapeChannel(lChannelIndex);
+			if (lChannel)
+			{
+				// Get the percentage of influence on this channel.
+				FbxAnimCurve* lFCurve = pMesh->GetShapeChannel(lBlendShapeIndex, lChannelIndex, pAnimLayer);
+				if (!lFCurve) continue;
+				double lWeight = lFCurve->Evaluate(pTime);
+
+				/*
+				If there is only one targetShape on this channel, the influence is easy to calculate:
+				influence = (targetShape - baseGeometry) * weight * 0.01
+				dstGeometry = baseGeometry + influence
+
+				But if there are more than one targetShapes on this channel, this is an in-between
+				blendshape, also called progressive morph. The calculation of influence is different.
+
+				For example, given two in-between targets, the full weight percentage of first target
+				is 50, and the full weight percentage of the second target is 100.
+				When the weight percentage reach 50, the base geometry is already be fully morphed
+				to the first target shape. When the weight go over 50, it begin to morph from the
+				first target shape to the second target shape.
+
+				To calculate influence when the weight percentage is 25:
+				1. 25 falls in the scope of 0 and 50, the morphing is from base geometry to the first target.
+				2. And since 25 is already half way between 0 and 50, so the real weight percentage change to
+				the first target is 50.
+				influence = (firstTargetShape - baseGeometry) * (25-0)/(50-0) * 100
+				dstGeometry = baseGeometry + influence
+
+				To calculate influence when the weight percentage is 75:
+				1. 75 falls in the scope of 50 and 100, the morphing is from the first target to the second.
+				2. And since 75 is already half way between 50 and 100, so the real weight percentage change
+				to the second target is 50.
+				influence = (secondTargetShape - firstTargetShape) * (75-50)/(100-50) * 100
+				dstGeometry = firstTargetShape + influence
+				*/
+
+				// Find the two shape indices for influence calculation according to the weight.
+				// Consider index of base geometry as -1.
+
+				int lShapeCount = lChannel->GetTargetShapeCount();
+				double* lFullWeights = lChannel->GetTargetShapeFullWeights();
+
+				// Find out which scope the lWeight falls in.
+				int lStartIndex = -1;
+				int lEndIndex = -1;
+				for (int lShapeIndex = 0; lShapeIndex < lShapeCount; ++lShapeIndex)
+				{
+					if (lWeight > 0 && lWeight <= lFullWeights[0])
+					{
+						lEndIndex = 0;
+						break;
+					}
+					if (lWeight > lFullWeights[lShapeIndex] && lWeight < lFullWeights[lShapeIndex + 1])
+					{
+						lStartIndex = lShapeIndex;
+						lEndIndex = lShapeIndex + 1;
+						break;
+					}
+				}
+
+				FbxShape* lStartShape = NULL;
+				FbxShape* lEndShape = NULL;
+				if (lStartIndex > -1)
+				{
+					lStartShape = lChannel->GetTargetShape(lStartIndex);
+				}
+				if (lEndIndex > -1)
+				{
+					lEndShape = lChannel->GetTargetShape(lEndIndex);
+				}
+
+				//The weight percentage falls between base geometry and the first target shape.
+				if (lStartIndex == -1 && lEndShape)
+				{
+					double lEndWeight = lFullWeights[0];
+					// Calculate the real weight.
+					lWeight = (lWeight / lEndWeight) * 100;
+					// Initialize the lDstVertexArray with vertex of base geometry.
+					memcpy(lDstVertexArray, lSrcVertexArray, lVertexCount * sizeof(FbxVector4));
+					for (int j = 0; j < lVertexCount; j++)
+					{
+						// Add the influence of the shape vertex to the mesh vertex.
+						FbxVector4 lInfluence = (lEndShape->GetControlPoints()[j] - lSrcVertexArray[j]) * lWeight * 0.01;
+						lDstVertexArray[j] += lInfluence;
+					}
+				}
+				//The weight percentage falls between two target shapes.
+				else if (lStartShape && lEndShape)
+				{
+					double lStartWeight = lFullWeights[lStartIndex];
+					double lEndWeight = lFullWeights[lEndIndex];
+					// Calculate the real weight.
+					lWeight = ((lWeight - lStartWeight) / (lEndWeight - lStartWeight)) * 100;
+					// Initialize the lDstVertexArray with vertex of the previous target shape geometry.
+					memcpy(lDstVertexArray, lStartShape->GetControlPoints(), lVertexCount * sizeof(FbxVector4));
+					for (int j = 0; j < lVertexCount; j++)
+					{
+						// Add the influence of the shape vertex to the previous shape vertex.
+						FbxVector4 lInfluence = (lEndShape->GetControlPoints()[j] - lStartShape->GetControlPoints()[j]) * lWeight * 0.01;
+						lDstVertexArray[j] += lInfluence;
+					}
+				}
+			}//If lChannel is valid
+		}//For each blend shape channel
+	}//For each blend shape deformer
+
+	memcpy(pVertexArray, lDstVertexArray, lVertexCount * sizeof(FbxVector4));
+
+	delete[] lDstVertexArray;
+}
+
+//Compute the transform matrix that the cluster will transform the vertex.
+void ComputeClusterDeformation(FbxAMatrix& pGlobalPosition,
+	FbxMesh* pMesh,
+	FbxCluster* pCluster,
+	FbxAMatrix& pVertexTransformMatrix,
+	FbxTime pTime,
+	FbxPose* pPose)
+{
+	FbxCluster::ELinkMode lClusterMode = pCluster->GetLinkMode();
+
+	FbxAMatrix lReferenceGlobalInitPosition;
+	FbxAMatrix lReferenceGlobalCurrentPosition;
+	FbxAMatrix lAssociateGlobalInitPosition;
+	FbxAMatrix lAssociateGlobalCurrentPosition;
+	FbxAMatrix lClusterGlobalInitPosition;
+	FbxAMatrix lClusterGlobalCurrentPosition;
+
+	FbxAMatrix lReferenceGeometry;
+	FbxAMatrix lAssociateGeometry;
+	FbxAMatrix lClusterGeometry;
+
+	FbxAMatrix lClusterRelativeInitPosition;
+	FbxAMatrix lClusterRelativeCurrentPositionInverse;
+
+	if (lClusterMode == FbxCluster::eAdditive && pCluster->GetAssociateModel())
+	{
+		pCluster->GetTransformAssociateModelMatrix(lAssociateGlobalInitPosition);
+		// Geometric transform of the model
+		lAssociateGeometry = GetGeometry(pCluster->GetAssociateModel());
+		lAssociateGlobalInitPosition *= lAssociateGeometry;
+		lAssociateGlobalCurrentPosition = GetGlobalPosition(pCluster->GetAssociateModel(), pTime, pPose);
+
+		pCluster->GetTransformMatrix(lReferenceGlobalInitPosition);
+		// Multiply lReferenceGlobalInitPosition by Geometric Transformation
+		lReferenceGeometry = GetGeometry(pMesh->GetNode());
+		lReferenceGlobalInitPosition *= lReferenceGeometry;
+		lReferenceGlobalCurrentPosition = pGlobalPosition;
+
+		// Get the link initial global position and the link current global position.
+		pCluster->GetTransformLinkMatrix(lClusterGlobalInitPosition);
+		// Multiply lClusterGlobalInitPosition by Geometric Transformation
+		lClusterGeometry = GetGeometry(pCluster->GetLink());
+		lClusterGlobalInitPosition *= lClusterGeometry;
+		lClusterGlobalCurrentPosition = GetGlobalPosition(pCluster->GetLink(), pTime, pPose);
+
+		// Compute the shift of the link relative to the reference.
+		//ModelM-1 * AssoM * AssoGX-1 * LinkGX * LinkM-1*ModelM
+		pVertexTransformMatrix = lReferenceGlobalInitPosition.Inverse() * lAssociateGlobalInitPosition * lAssociateGlobalCurrentPosition.Inverse() *
+			lClusterGlobalCurrentPosition * lClusterGlobalInitPosition.Inverse() * lReferenceGlobalInitPosition;
+	}
+	else
+	{
+		pCluster->GetTransformMatrix(lReferenceGlobalInitPosition);
+		lReferenceGlobalCurrentPosition = pGlobalPosition;
+		// Multiply lReferenceGlobalInitPosition by Geometric Transformation
+		lReferenceGeometry = GetGeometry(pMesh->GetNode());
+		lReferenceGlobalInitPosition *= lReferenceGeometry;
+
+		// Get the link initial global position and the link current global position.
+		pCluster->GetTransformLinkMatrix(lClusterGlobalInitPosition);
+		lClusterGlobalCurrentPosition = GetGlobalPosition(pCluster->GetLink(), pTime, pPose);
+
+		// Compute the initial position of the link relative to the reference.
+		lClusterRelativeInitPosition = lClusterGlobalInitPosition.Inverse() * lReferenceGlobalInitPosition;
+
+		// Compute the current position of the link relative to the reference.
+		lClusterRelativeCurrentPositionInverse = lReferenceGlobalCurrentPosition.Inverse() * lClusterGlobalCurrentPosition;
+
+		// Compute the shift of the link relative to the reference.
+		pVertexTransformMatrix = lClusterRelativeCurrentPositionInverse * lClusterRelativeInitPosition;
+	}
+}
+
+// Deform the vertex array in classic linear way.
+void ComputeLinearDeformation(FbxAMatrix& pGlobalPosition,
+	FbxMesh* pMesh,
+	FbxTime& pTime,
+	FbxVector4* pVertexArray,
+	FbxPose* pPose)
+{
+	// All the links must have the same link mode.
+	FbxCluster::ELinkMode lClusterMode = ((FbxSkin*)pMesh->GetDeformer(0, FbxDeformer::eSkin))->GetCluster(0)->GetLinkMode();
+
+	int lVertexCount = pMesh->GetControlPointsCount();
+	FbxAMatrix* lClusterDeformation = new FbxAMatrix[lVertexCount];
+	memset(lClusterDeformation, 0, lVertexCount * sizeof(FbxAMatrix));
+
+	double* lClusterWeight = new double[lVertexCount];
+	memset(lClusterWeight, 0, lVertexCount * sizeof(double));
+
+	if (lClusterMode == FbxCluster::eAdditive)
+	{
+		for (int i = 0; i < lVertexCount; ++i)
+		{
+			lClusterDeformation[i].SetIdentity();
+		}
+	}
+
+	// For all skins and all clusters, accumulate their deformation and weight
+	// on each vertices and store them in lClusterDeformation and lClusterWeight.
+	int lSkinCount = pMesh->GetDeformerCount(FbxDeformer::eSkin);
+	for (int lSkinIndex = 0; lSkinIndex < lSkinCount; ++lSkinIndex)
+	{
+		FbxSkin * lSkinDeformer = (FbxSkin *)pMesh->GetDeformer(lSkinIndex, FbxDeformer::eSkin);
+
+		int lClusterCount = lSkinDeformer->GetClusterCount();
+		for (int lClusterIndex = 0; lClusterIndex < lClusterCount; ++lClusterIndex)
+		{
+			FbxCluster* lCluster = lSkinDeformer->GetCluster(lClusterIndex);
+			if (!lCluster->GetLink())
+				continue;
+
+			FbxAMatrix lVertexTransformMatrix;
+			ComputeClusterDeformation(pGlobalPosition, pMesh, lCluster, lVertexTransformMatrix, pTime, pPose);
+
+			int lVertexIndexCount = lCluster->GetControlPointIndicesCount();
+			for (int k = 0; k < lVertexIndexCount; ++k)
+			{
+				int lIndex = lCluster->GetControlPointIndices()[k];
+
+				// Sometimes, the mesh can have less points than at the time of the skinning
+				// because a smooth operator was active when skinning but has been deactivated during export.
+				if (lIndex >= lVertexCount)
+					continue;
+
+				double lWeight = lCluster->GetControlPointWeights()[k];
+
+				if (lWeight == 0.0)
+				{
+					continue;
+				}
+
+				// Compute the influence of the link on the vertex.
+				FbxAMatrix lInfluence = lVertexTransformMatrix;
+				MatrixScale(lInfluence, lWeight);
+
+				if (lClusterMode == FbxCluster::eAdditive)
+				{
+					// Multiply with the product of the deformations on the vertex.
+					MatrixAddToDiagonal(lInfluence, 1.0 - lWeight);
+					lClusterDeformation[lIndex] = lInfluence * lClusterDeformation[lIndex];
+
+					// Set the link to 1.0 just to know this vertex is influenced by a link.
+					lClusterWeight[lIndex] = 1.0;
+				}
+				else // lLinkMode == FbxCluster::eNormalize || lLinkMode == FbxCluster::eTotalOne
+				{
+					// Add to the sum of the deformations on the vertex.
+					MatrixAdd(lClusterDeformation[lIndex], lInfluence);
+
+					// Add to the sum of weights to either normalize or complete the vertex.
+					lClusterWeight[lIndex] += lWeight;
+				}
+			}//For each vertex			
+		}//lClusterCount
+	}
+
+	//Actually deform each vertices here by information stored in lClusterDeformation and lClusterWeight
+	for (int i = 0; i < lVertexCount; i++)
+	{
+		FbxVector4 lSrcVertex = pVertexArray[i];
+		FbxVector4& lDstVertex = pVertexArray[i];
+		double lWeight = lClusterWeight[i];
+
+		// Deform the vertex if there was at least a link with an influence on the vertex,
+		if (lWeight != 0.0)
+		{
+			lDstVertex = lClusterDeformation[i].MultT(lSrcVertex);
+			if (lClusterMode == FbxCluster::eNormalize)
+			{
+				// In the normalized link mode, a vertex is always totally influenced by the links. 
+				lDstVertex /= lWeight;
+			}
+			else if (lClusterMode == FbxCluster::eTotalOne)
+			{
+				// In the total 1 link mode, a vertex can be partially influenced by the links. 
+				lSrcVertex *= (1.0 - lWeight);
+				lDstVertex += lSrcVertex;
+			}
+		}
+	}
+
+	delete[] lClusterDeformation;
+	delete[] lClusterWeight;
+}
+
+// Deform the vertex array in Dual Quaternion Skinning way.
+void ComputeDualQuaternionDeformation(FbxAMatrix& pGlobalPosition,
+	FbxMesh* pMesh,
+	FbxTime& pTime,
+	FbxVector4* pVertexArray,
+	FbxPose* pPose)
+{
+	// All the links must have the same link mode.
+	FbxCluster::ELinkMode lClusterMode = ((FbxSkin*)pMesh->GetDeformer(0, FbxDeformer::eSkin))->GetCluster(0)->GetLinkMode();
+
+	int lVertexCount = pMesh->GetControlPointsCount();
+	int lSkinCount = pMesh->GetDeformerCount(FbxDeformer::eSkin);
+
+	FbxDualQuaternion* lDQClusterDeformation = new FbxDualQuaternion[lVertexCount];
+	memset(lDQClusterDeformation, 0, lVertexCount * sizeof(FbxDualQuaternion));
+
+	double* lClusterWeight = new double[lVertexCount];
+	memset(lClusterWeight, 0, lVertexCount * sizeof(double));
+
+	// For all skins and all clusters, accumulate their deformation and weight
+	// on each vertices and store them in lClusterDeformation and lClusterWeight.
+	for (int lSkinIndex = 0; lSkinIndex < lSkinCount; ++lSkinIndex)
+	{
+		FbxSkin * lSkinDeformer = (FbxSkin *)pMesh->GetDeformer(lSkinIndex, FbxDeformer::eSkin);
+		int lClusterCount = lSkinDeformer->GetClusterCount();
+		for (int lClusterIndex = 0; lClusterIndex < lClusterCount; ++lClusterIndex)
+		{
+			FbxCluster* lCluster = lSkinDeformer->GetCluster(lClusterIndex);
+			if (!lCluster->GetLink())
+				continue;
+
+			FbxAMatrix lVertexTransformMatrix;
+			ComputeClusterDeformation(pGlobalPosition, pMesh, lCluster, lVertexTransformMatrix, pTime, pPose);
+
+			FbxQuaternion lQ = lVertexTransformMatrix.GetQ();
+			FbxVector4 lT = lVertexTransformMatrix.GetT();
+			FbxDualQuaternion lDualQuaternion(lQ, lT);
+
+			int lVertexIndexCount = lCluster->GetControlPointIndicesCount();
+			for (int k = 0; k < lVertexIndexCount; ++k)
+			{
+				int lIndex = lCluster->GetControlPointIndices()[k];
+
+				// Sometimes, the mesh can have less points than at the time of the skinning
+				// because a smooth operator was active when skinning but has been deactivated during export.
+				if (lIndex >= lVertexCount)
+					continue;
+
+				double lWeight = lCluster->GetControlPointWeights()[k];
+
+				if (lWeight == 0.0)
+					continue;
+
+				// Compute the influence of the link on the vertex.
+				FbxDualQuaternion lInfluence = lDualQuaternion * lWeight;
+				if (lClusterMode == FbxCluster::eAdditive)
+				{
+					// Simply influenced by the dual quaternion.
+					lDQClusterDeformation[lIndex] = lInfluence;
+
+					// Set the link to 1.0 just to know this vertex is influenced by a link.
+					lClusterWeight[lIndex] = 1.0;
+				}
+				else // lLinkMode == FbxCluster::eNormalize || lLinkMode == FbxCluster::eTotalOne
+				{
+					if (lClusterIndex == 0)
+					{
+						lDQClusterDeformation[lIndex] = lInfluence;
+					}
+					else
+					{
+						// Add to the sum of the deformations on the vertex.
+						// Make sure the deformation is accumulated in the same rotation direction. 
+						// Use dot product to judge the sign.
+						double lSign = lDQClusterDeformation[lIndex].GetFirstQuaternion().DotProduct(lDualQuaternion.GetFirstQuaternion());
+						if (lSign >= 0.0)
+						{
+							lDQClusterDeformation[lIndex] += lInfluence;
+						}
+						else
+						{
+							lDQClusterDeformation[lIndex] -= lInfluence;
+						}
+					}
+					// Add to the sum of weights to either normalize or complete the vertex.
+					lClusterWeight[lIndex] += lWeight;
+				}
+			}//For each vertex
+		}//lClusterCount
+	}
+
+	//Actually deform each vertices here by information stored in lClusterDeformation and lClusterWeight
+	for (int i = 0; i < lVertexCount; i++)
+	{
+		FbxVector4 lSrcVertex = pVertexArray[i];
+		FbxVector4& lDstVertex = pVertexArray[i];
+		double lWeightSum = lClusterWeight[i];
+
+		// Deform the vertex if there was at least a link with an influence on the vertex,
+		if (lWeightSum != 0.0)
+		{
+			lDQClusterDeformation[i].Normalize();
+			lDstVertex = lDQClusterDeformation[i].Deform(lDstVertex);
+
+			if (lClusterMode == FbxCluster::eNormalize)
+			{
+				// In the normalized link mode, a vertex is always totally influenced by the links. 
+				lDstVertex /= lWeightSum;
+			}
+			else if (lClusterMode == FbxCluster::eTotalOne)
+			{
+				// In the total 1 link mode, a vertex can be partially influenced by the links. 
+				lSrcVertex *= (1.0 - lWeightSum);
+				lDstVertex += lSrcVertex;
+			}
+		}
+	}
+
+	delete[] lDQClusterDeformation;
+	delete[] lClusterWeight;
+}
+
+// Deform the vertex array according to the links contained in the mesh and the skinning type.
+void ComputeSkinDeformation(FbxAMatrix& pGlobalPosition,
+	FbxMesh* pMesh,
+	FbxTime& pTime,
+	FbxVector4* pVertexArray,
+	FbxPose* pPose)
+{
+	FbxSkin * lSkinDeformer = (FbxSkin *)pMesh->GetDeformer(0, FbxDeformer::eSkin);
+	FbxSkin::EType lSkinningType = lSkinDeformer->GetSkinningType();
+
+	if (lSkinningType == FbxSkin::eLinear || lSkinningType == FbxSkin::eRigid)
+	{
+		ComputeLinearDeformation(pGlobalPosition, pMesh, pTime, pVertexArray, pPose);
+	}
+	else if (lSkinningType == FbxSkin::eDualQuaternion)
+	{
+		ComputeDualQuaternionDeformation(pGlobalPosition, pMesh, pTime, pVertexArray, pPose);
+	}
+	else if (lSkinningType == FbxSkin::eBlend)
+	{
+		int lVertexCount = pMesh->GetControlPointsCount();
+
+		FbxVector4* lVertexArrayLinear = new FbxVector4[lVertexCount];
+		memcpy(lVertexArrayLinear, pMesh->GetControlPoints(), lVertexCount * sizeof(FbxVector4));
+
+		FbxVector4* lVertexArrayDQ = new FbxVector4[lVertexCount];
+		memcpy(lVertexArrayDQ, pMesh->GetControlPoints(), lVertexCount * sizeof(FbxVector4));
+
+		ComputeLinearDeformation(pGlobalPosition, pMesh, pTime, lVertexArrayLinear, pPose);
+		ComputeDualQuaternionDeformation(pGlobalPosition, pMesh, pTime, lVertexArrayDQ, pPose);
+
+		// To blend the skinning according to the blend weights
+		// Final vertex = DQSVertex * blend weight + LinearVertex * (1- blend weight)
+		// DQSVertex: vertex that is deformed by dual quaternion skinning method;
+		// LinearVertex: vertex that is deformed by classic linear skinning method;
+		int lBlendWeightsCount = lSkinDeformer->GetControlPointIndicesCount();
+		for (int lBWIndex = 0; lBWIndex < lBlendWeightsCount; ++lBWIndex)
+		{
+			double lBlendWeight = lSkinDeformer->GetControlPointBlendWeights()[lBWIndex];
+			pVertexArray[lBWIndex] = lVertexArrayDQ[lBWIndex] * lBlendWeight + lVertexArrayLinear[lBWIndex] * (1 - lBlendWeight);
+		}
+	}
+}
+
+FbxAMatrix GetGlobalPosition(FbxNode* pNode, const FbxTime& pTime, FbxPose* pPose, FbxAMatrix* pParentGlobalPosition)
+{
+	FbxAMatrix lGlobalPosition;
+	bool        lPositionFound = false;
+
+	if (pPose)
+	{
+		int lNodeIndex = pPose->Find(pNode);
+
+		if (lNodeIndex > -1)
+		{
+			// The bind pose is always a global matrix.
+			// If we have a rest pose, we need to check if it is
+			// stored in global or local space.
+			if (pPose->IsBindPose() || !pPose->IsLocalMatrix(lNodeIndex))
+			{
+				lGlobalPosition = GetPoseMatrix(pPose, lNodeIndex);
+			}
+			else
+			{
+				// We have a local matrix, we need to convert it to
+				// a global space matrix.
+				FbxAMatrix lParentGlobalPosition;
+
+				if (pParentGlobalPosition)
+				{
+					lParentGlobalPosition = *pParentGlobalPosition;
+				}
+				else
+				{
+					if (pNode->GetParent())
+					{
+						lParentGlobalPosition = GetGlobalPosition(pNode->GetParent(), pTime, pPose);
+					}
+				}
+
+				FbxAMatrix lLocalPosition = GetPoseMatrix(pPose, lNodeIndex);
+				lGlobalPosition = lParentGlobalPosition * lLocalPosition;
+			}
+
+			lPositionFound = true;
+		}
+	}
+
+	if (!lPositionFound)
+	{
+		// There is no pose entry for that node, get the current global position instead.
+
+		// Ideally this would use parent global position and local position to compute the global position.
+		// Unfortunately the equation 
+		//    lGlobalPosition = pParentGlobalPosition * lLocalPosition
+		// does not hold when inheritance type is other than "Parent" (RSrs).
+		// To compute the parent rotation and scaling is tricky in the RrSs and Rrs cases.
+		lGlobalPosition = pNode->EvaluateGlobalTransform(pTime);
+	}
+
+	return lGlobalPosition;
+}
+
+// Get the matrix of the given pose
+FbxAMatrix GetPoseMatrix(FbxPose* pPose, int pNodeIndex)
+{
+	FbxAMatrix lPoseMatrix;
+	FbxMatrix lMatrix = pPose->GetMatrix(pNodeIndex);
+
+	memcpy((double*)lPoseMatrix, (double*)lMatrix, sizeof(lMatrix.mData));
+
+	return lPoseMatrix;
+}
+
+// Get the geometry offset to a node. It is never inherited by the children.
+FbxAMatrix GetGeometry(FbxNode* pNode)
+{
+	const FbxVector4 lT = pNode->GetGeometricTranslation(FbxNode::eSourcePivot);
+	const FbxVector4 lR = pNode->GetGeometricRotation(FbxNode::eSourcePivot);
+	const FbxVector4 lS = pNode->GetGeometricScaling(FbxNode::eSourcePivot);
+
+	return FbxAMatrix(lT, lR, lS);
+}
+
+// Scale all the elements of a matrix.
+void MatrixScale(FbxAMatrix& pMatrix, double pValue)
+{
+	int i, j;
+
+	for (i = 0; i < 4; i++)
+	{
+		for (j = 0; j < 4; j++)
+		{
+			pMatrix[i][j] *= pValue;
+		}
+	}
+}
+
+
+// Add a value to all the elements in the diagonal of the matrix.
+void MatrixAddToDiagonal(FbxAMatrix& pMatrix, double pValue)
+{
+	pMatrix[0][0] += pValue;
+	pMatrix[1][1] += pValue;
+	pMatrix[2][2] += pValue;
+	pMatrix[3][3] += pValue;
+}
+
+
+// Sum two matrices element by element.
+void MatrixAdd(FbxAMatrix& pDstMatrix, FbxAMatrix& pSrcMatrix)
+{
+	int i, j;
+
+	for (i = 0; i < 4; i++)
+	{
+		for (j = 0; j < 4; j++)
+		{
+			pDstMatrix[i][j] += pSrcMatrix[i][j];
+		}
+	}
+}
+
+typedef struct
+{
+	GLuint vao;
+	GLuint vbo;
+	GLuint vboTex;
+	GLuint ebo;
+	int materialId;
+	int indexCount;
+} Shape;
+
+typedef struct
+{
+	GLuint texId;
+} Material;
+
+vector<Shape> characterShapes;
+vector<Material> characterMaterials;
+fbx_handles characterFbx;
+
+void My_LoadModels()
+{
+	std::vector<tinyobj::shape_t> shapes;
+	std::vector<tinyobj::material_t> materials;
+
+	std::string err;
+
+	bool ret = LoadFbx(characterFbx, shapes, materials, err, "Running.FBX");
+
+	if (ret)
+	{
+		// For Each Material
+		for (int i = 0; i < materials.size(); i++)
+		{
+			ILuint ilTexName;
+			ilGenImages(1, &ilTexName);
+			ilBindImage(ilTexName);
+			Material mat;
+			if (ilLoadImage(materials[i].diffuse_texname.c_str()))
+			{
+				int width = ilGetInteger(IL_IMAGE_WIDTH);
+				int height = ilGetInteger(IL_IMAGE_HEIGHT);
+				unsigned char *data = new unsigned char[width * height * 4];
+				ilCopyPixels(0, 0, 0, width, height, 1, IL_RGBA, IL_UNSIGNED_BYTE, data);
+
+				glGenTextures(1, &mat.texId);
+				glBindTexture(GL_TEXTURE_2D, mat.texId);
+				glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+				glGenerateMipmap(GL_TEXTURE_2D);
+
+				delete[] data;
+				ilDeleteImages(1, &ilTexName);
+			}
+			characterMaterials.push_back(mat);
+		}
+
+		// For Each Shape (or Mesh, Object)
+		for (int i = 0; i < shapes.size(); i++)
+		{
+			Shape shape;
+			glGenVertexArrays(1, &shape.vao);
+			glBindVertexArray(shape.vao);
+
+			glGenBuffers(3, &shape.vbo);
+			glBindBuffer(GL_ARRAY_BUFFER, shape.vbo);
+			glBufferData(GL_ARRAY_BUFFER, shapes[i].mesh.positions.size() * sizeof(float), shapes[i].mesh.positions.data(), GL_STATIC_DRAW);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+			glBindBuffer(GL_ARRAY_BUFFER, shape.vboTex);
+			glBufferData(GL_ARRAY_BUFFER, shapes[i].mesh.texcoords.size() * sizeof(float), shapes[i].mesh.texcoords.data(), GL_STATIC_DRAW);
+			glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, 0);
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, shape.ebo);
+			glBufferData(GL_ELEMENT_ARRAY_BUFFER, shapes[i].mesh.indices.size() * sizeof(unsigned int), shapes[i].mesh.indices.data(), GL_STATIC_DRAW);
+			shape.materialId = shapes[i].mesh.material_ids[0];
+			shape.indexCount = shapes[i].mesh.indices.size();
+			glEnableVertexAttribArray(0);
+			glEnableVertexAttribArray(1);
+			characterShapes.push_back(shape);
+
+
+		}
+	}
+}
 
 char** loadShaderSource(const char* file)
 {
@@ -42,6 +1658,9 @@ GLint tex_mode;
 GLuint texture_location;
 int texture_mode = 0;
 
+//mat4 mvp;
+GLint um4mvp;
+
 mat4 view;					// V of MVP, viewing matrix
 mat4 projection;			// P of MVP, projection matrix
 mat4 model;					// M of MVP, model matrix
@@ -50,9 +1669,11 @@ float viewportAspect;
 mat4 scaleOne, M;
 mat4 model_matrix;
 
-vec3 cameraPos = vec3(-300.0f, 20.0f, -30.0f);
-vec3 cameraFront = vec3(-15.0f, 0.0f, 0.0f);
+
+vec3 cameraPos = vec3(217.337f, 233.84f, 117.691f);
+vec3 cameraFront = vec3(-0.577186f, -0.374607f, -0.725622f);
 vec3 cameraUp = vec3(0.0f, 1.0f, 0.0f);
+
 
 //Initialize Variable For Mouse Control
 vec3 cameraSpeed = vec3(10.0f, 10.0f, 10.0f);
@@ -60,27 +1681,6 @@ float yaws = -90.0;
 float pitchs = 0.0;
 bool firstMouse = true;
 float lastX = 300, lastY = 300;
-
-struct Shape {
-	GLuint vao;
-	GLuint vbo;
-	GLuint vbo_position;
-	GLuint vbo_normal;
-	GLuint vbo_texcoord;
-	GLuint ibo;
-	int drawCount;
-	int materialID;
-};
-
-struct Material {
-	GLuint diffuse_tex;
-};
-
-vector<Material> vertex_material;
-vector<Shape> vertex_shape;
-
-Shape m_shape;
-
 
 GLuint model_program;
 GLuint ssao_program;
@@ -651,76 +2251,6 @@ Model objModel;
 Model objhuman;
 // ---------------------------------------------------- Loader ---------------------------------------------------->
 
-void My_LoadModels()
-{
-	tinyobj::attrib_t attrib;
-	vector<tinyobj::shape_t> shapes;
-	vector<tinyobj::material_t> materials;
-	string warn;
-	string err;
-	bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, "nanosuit.obj");
-	if (!warn.empty()) {
-		cout << warn << endl;
-	}
-	if (!err.empty()) {
-		cout << err << endl;
-	}
-	if (!ret) {
-		exit(1);
-	}
-
-	vector<float> vertices, texcoords, normals;  // if OBJ preserves vertex order, you can use element array buffer for memory efficiency
-	for (int s = 0; s < shapes.size(); ++s) {  // for 'ladybug.obj', there is only one object
-		int index_offset = 0;
-		for (int f = 0; f < shapes[s].mesh.num_face_vertices.size(); ++f) {
-			int fv = shapes[s].mesh.num_face_vertices[f];
-			for (int v = 0; v < fv; ++v) {
-				tinyobj::index_t idx = shapes[s].mesh.indices[index_offset + v];
-				vertices.push_back(attrib.vertices[3 * idx.vertex_index + 0]);
-				vertices.push_back(attrib.vertices[3 * idx.vertex_index + 1]);
-				vertices.push_back(attrib.vertices[3 * idx.vertex_index + 2]);
-				texcoords.push_back(attrib.texcoords[2 * idx.texcoord_index + 0]);
-				texcoords.push_back(attrib.texcoords[2 * idx.texcoord_index + 1]);
-				normals.push_back(attrib.normals[3 * idx.normal_index + 0]);
-				normals.push_back(attrib.normals[3 * idx.normal_index + 1]);
-				normals.push_back(attrib.normals[3 * idx.normal_index + 2]);
-			}
-			index_offset += fv;
-			m_shape.drawCount += fv;
-		}
-	}
-
-	glGenVertexArrays(1, &m_shape.vao);
-	glBindVertexArray(m_shape.vao);
-
-	glGenBuffers(1, &m_shape.vbo);
-	glBindBuffer(GL_ARRAY_BUFFER, m_shape.vbo);
-
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float) + texcoords.size() * sizeof(float) + normals.size() * sizeof(float), NULL, GL_STATIC_DRAW);
-	glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(float), vertices.data());
-	glBufferSubData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), texcoords.size() * sizeof(float), texcoords.data());
-	glBufferSubData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float) + texcoords.size() * sizeof(float), normals.size() * sizeof(float), normals.data());
-
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, (GLvoid*)(vertices.size() * sizeof(float)));
-	glEnableVertexAttribArray(1);
-	glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, (GLvoid*)(vertices.size() * sizeof(float) + texcoords.size() * sizeof(float)));
-	glEnableVertexAttribArray(2);
-
-	shapes.clear();
-	shapes.shrink_to_fit();
-	materials.clear();
-	materials.shrink_to_fit();
-	vertices.clear();
-	vertices.shrink_to_fit();
-	texcoords.clear();
-	texcoords.shrink_to_fit();
-	normals.clear();
-	normals.shrink_to_fit();
-
-	cout << "Load " << m_shape.drawCount << " vertices" << endl;
-}
 
 GLuint lightSpaceMatrixLocation;
 GLuint modelLocation;
@@ -808,28 +2338,6 @@ void toon_Init() {
 	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 }
 
-void toon_Render() {
-
-
-	float currentTime = glutGet(GLUT_ELAPSED_TIME) * 0.001f;
-
-	glUseProgram(model_program);
-
-
-	model_matrix = translate(mat4(1.0), vec3());
-	model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
-	model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
-
-	glBindVertexArray(m_shape.vao);
-
-	glUniformMatrix4fv(uniforms.toon.mv_matrix, 1, GL_FALSE, &(view * model_matrix)[0][0]);
-	glUniformMatrix4fv(uniforms.toon.proj_matrix, 1, GL_FALSE, &projection[0][0]);
-
-	glBindTexture(GL_TEXTURE_1D, tex_toon);
-
-	glDrawArrays(GL_TRIANGLES, 0, m_shape.drawCount);
-}
-
 void model_Init() {
 	model_program = glCreateProgram();
 
@@ -859,7 +2367,6 @@ void model_Init() {
 	toon_Init();
 	//shadow_Init();
 	//SSAO_Init();
-	My_LoadModels();
 }
 
 /*-----------------------------------------------Toon Shading and Model Part-----------------------------------------------*/
@@ -1018,7 +2525,7 @@ void Terrain_init()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 	glActiveTexture(GL_TEXTURE1);
-	texture_data tdata2 = loadImg("terragen_color.png");
+	texture_data tdata2 = loadImg("terragen_newColor.png");
 	tdata2.data == NULL ? printf("load terrain color image fail\n") : printf("load terrain color image sucessful\n");
 	glGenTextures(1, &tex_color);
 	glBindTexture(GL_TEXTURE_2D, tex_color);
@@ -1071,6 +2578,7 @@ void Terrain_rendering()
 	glDrawArraysInstanced(GL_PATCHES, 0, 4, 64 * 64);
 }
 /*----------------------------------------------- Terrain part (teacher) -----------------------------------------------*/
+
 
 
 
@@ -1153,13 +2661,13 @@ void renderScene() {
 }
 
 void renderModel() {
-	glUseProgram(scene_program);
+	/*glUseProgram(scene_program);
 
 	model_matrix = translate(mat4(1.0), vec3());
 	model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
-	model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
-	glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(view * model_matrix));
-	objhuman.Draw(scene_program);
+	model_matrix = scale(model_matrix, vec3(0.5f, 0.5f, 0.5f));*/
+	//glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(view * model_matrix));
+	//objhuman.Draw(scene_program);
 }
 
 //-----------------End Load Scene Function and Variables------------------------
@@ -1453,16 +2961,792 @@ void ssao_render() {
 /*-----------------------------------------------SSAO--------------------------------------*/
 
 
+/*---------------------------------------Running Man--------------------------------------*/
+GLuint program;
+int running_man = 1;
+std::vector<tinyobj::shape_t> new_shapes;
+
+glm::mat4 running_man_model;
+
+GLfloat running_man_x = 0.0f;
+GLfloat running_man_y = 1.0f;
+GLfloat running_man_z = 0.0f;
+
+void render_running_man() {
+	glUseProgram(scene_program);
+	GetFbxAnimation(characterFbx, new_shapes, timer_cnt / 600.0f);
+
+	for (unsigned int i = 0; i < characterShapes.size(); ++i)
+	{
+		glBindVertexArray(characterShapes[i].vao);
+		glBindBuffer(GL_ARRAY_BUFFER, characterShapes[i].vbo);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, new_shapes[i].mesh.positions.size() * sizeof(float), new_shapes[i].mesh.positions.data());
+		glBindTexture(GL_TEXTURE_2D, characterMaterials[characterShapes[i].materialId].texId);
+		running_man_model = translate(mat4(1.0), vec3());
+		running_man_model = translate(running_man_model, vec3(running_man_x, running_man_y, running_man_z));
+		running_man_model = scale(running_man_model, vec3(0.5f, 0.5f, 0.5f));
+		glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(view * running_man_model));
+		glDrawElements(GL_TRIANGLES, characterShapes[i].indexCount, GL_UNSIGNED_INT, 0);
+	}
+}
+
+/*---------------------------------------Running Man--------------------------------------*/
+
+
+/*---------------------------------------Rain--------------------------------------*/
+#define MAX_PARTICLES 2000
+#define RAIN	0
+#define SNOW	1
+#define	HAIL	2
+
+
+float slowdown = 1.0;
+float velocity = 0.0;
+float zoom = -40.0;
+float pan = 0.0;
+float tilt = 0.0;
+float hailsize = 0.1;
+
+int loop;
+int fall;
+
+//floor colors
+float r = 0.0;
+float g = 1.0;
+float b = 0.0;
+float ground_points[21][21][3];
+float ground_colors[21][21][4];
+float accum = -10.0;
+
+
+typedef struct {
+	// Life
+	bool alive;	// is the particle alive?
+	float life;	// particle lifespan
+	float fade; // decay
+	// color
+	float red;
+	float green;
+	float blue;
+	// Position/direction
+	float xpos;
+	float ypos;
+	float zpos;
+	// Velocity/Direction, only goes down in y dir
+	float vel;
+	// Gravity
+	float gravity;
+}particles;
+
+// Paticle System
+particles par_sys[MAX_PARTICLES];
+
+// Initialize/Reset Particles - give them their attributes
+void particles_settings(int i) {
+	par_sys[i].alive = true;
+	par_sys[i].life = 1.0;
+	par_sys[i].fade = float(rand() % 100) / 1000.0f + 0.003f;
+
+	par_sys[i].xpos = (float)(rand() % 100) -50;
+	par_sys[i].ypos = 15.0;
+	par_sys[i].zpos = (float)(rand() % 21) - 10;
+
+	par_sys[i].red = 0.5;
+	par_sys[i].green = 0.5;
+	par_sys[i].blue = 1.0;
+
+	par_sys[i].vel = velocity;
+	par_sys[i].gravity = -0.8;//-0.8;
+
+}
+
+void init_particle() {
+	int x, z;
+
+	glShadeModel(GL_SMOOTH);
+	glClearColor(0.0, 0.0, 0.0, 0.0);
+	glClearDepth(1.0);
+	glEnable(GL_DEPTH_TEST);
+
+	// Ground Verticies
+	  // Ground Colors
+	for (z = 0; z < 21; z++) {
+		for (x = 0; x < 21; x++) {
+			ground_points[x][z][0] = x - 10.0;
+			ground_points[x][z][1] = accum;
+			ground_points[x][z][2] = z - 10.0;
+
+			ground_colors[z][x][0] = r; // red value
+			ground_colors[z][x][1] = g; // green value
+			ground_colors[z][x][2] = b; // blue value
+			ground_colors[z][x][3] = 0.0; // acummulation factor
+		}
+	}
+
+	// Initialize particles
+	for (loop = 0; loop < MAX_PARTICLES; loop++) {
+		particles_settings(loop);
+	}
+}
+
+// For Rain
+void drawRain() {
+	float x, y, z;
+	for (loop = 0; loop < MAX_PARTICLES; loop = loop + 2) {
+		if (par_sys[loop].alive == true) {
+			x = par_sys[loop].xpos;
+			y = par_sys[loop].ypos;
+			z = par_sys[loop].zpos + zoom;
+
+			// Draw particles
+			glColor3f(0.5, 0.5, 1.0);
+			glBegin(GL_LINES);
+			glVertex3f(x, y, z);
+			glVertex3f(x, y + 0.5, z);
+			glEnd();
+
+			// Update values
+			//Move
+			// Adjust slowdown for speed!
+			par_sys[loop].ypos += par_sys[loop].vel / (slowdown * 1000);
+			par_sys[loop].vel += par_sys[loop].gravity;
+			// Decay
+			par_sys[loop].life -= par_sys[loop].fade;
+
+			if (par_sys[loop].ypos <= -10) {
+				par_sys[loop].life = -1.0;
+			}
+			//Revive
+			if (par_sys[loop].life < 0.0) {
+				particles_settings(loop);
+			}
+		}
+	}
+}
+
+// Draw Particles
+void render_particle() {
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+
+	gluPerspective(45.0f, (float)viewport_size.width / (float)viewport_size.height, 0.1, 3000.0f);
+
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
+	glUseProgram(0);
+	int i, j;
+	float x, y, z;
+
+	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glMatrixMode(GL_MODELVIEW);
+
+	glLoadIdentity();
+
+	glRotatef(pan, 0.0, 1.0, 0.0);
+	glRotatef(tilt, 1.0, 0.0, 1.0);
+
+	// along z - y const
+	for (i = -10; i + 1 < 11; i++) {
+		// along x - y const
+		for (j = -10; j + 1 < 11; j++) {
+			glColor3fv(ground_colors[i + 10][j + 10]);
+			glVertex3f(ground_points[j + 10][i + 10][0],
+				ground_points[j + 10][i + 10][1],
+				ground_points[j + 10][i + 10][2] + zoom);
+			glColor3fv(ground_colors[i + 10][j + 1 + 10]);
+			glVertex3f(ground_points[j + 1 + 10][i + 10][0],
+				ground_points[j + 1 + 10][i + 10][1],
+				ground_points[j + 1 + 10][i + 10][2] + zoom);
+			glColor3fv(ground_colors[i + 1 + 10][j + 1 + 10]);
+			glVertex3f(ground_points[j + 1 + 10][i + 1 + 10][0],
+				ground_points[j + 1 + 10][i + 1 + 10][1],
+				ground_points[j + 1 + 10][i + 1 + 10][2] + zoom);
+			glColor3fv(ground_colors[i + 1 + 10][j + 10]);
+			glVertex3f(ground_points[j + 10][i + 1 + 10][0],
+				ground_points[j + 10][i + 1 + 10][1],
+				ground_points[j + 10][i + 1 + 10][2] + zoom);
+		}
+
+	}
+
+	drawRain();
+}
+
+/*---------------------------------------Rain--------------------------------------*/
+
+
+/*---------------------------------------Particle Flame--------------------------------------*/
+
+
+#define MAX_PARTICLE_COUNT 1000
+
+struct DrawArraysIndirectCommand
+{
+	uint count;
+	uint primCount;
+	uint first;
+	uint baseInstance;
+};
+DrawArraysIndirectCommand defalutDrawArraysCommand = { 0, 1, 0, 0 };
+
+struct Particle
+{
+	vec3 position;
+	float _padding;
+	vec3 velocity;
+	float lifeTime;
+};
+
+struct ParticleBuffer
+{
+	GLuint shaderStorageBuffer;
+	GLuint indirectBuffer;
+};
+
+ParticleBuffer particleIn;
+ParticleBuffer particleOut;
+GLuint particleTexture;
+GLuint updateProgram;
+GLuint addProgram;
+GLuint renderProgram;
+GLuint particle_vao;
+mat4 mv(1.0f);
+mat4 p(1.0f);
+
+const char* add_cs_source[] =
+{
+	"#version 430 core                                                                                               \n"
+	"                                                                                                                \n"
+	"layout(local_size_x = 1000, local_size_y = 1, local_size_z = 1) in;                                             \n"
+	"                                                                                                                \n"
+	"struct Particle                                                                                                 \n"
+	"{                                                                                                               \n"
+	"    vec3 position;                                                                                              \n"
+	"    vec3 velocity;                                                                                              \n"
+	"    float lifeTime;                                                                                             \n"
+	"};                                                                                                              \n"
+	"                                                                                                                \n"
+	"layout(std140, binding=0) buffer Particles                                                                      \n"
+	"{                                                                                                               \n"
+	"     Particle particles[1000];                                                                                  \n"
+	"};                                                                                                              \n"
+	"                                                                                                                \n"
+	"layout(binding = 0, offset = 0) uniform atomic_uint count;                                                      \n"
+	"layout(location = 0) uniform uint addCount;                                                                     \n"
+	"layout(location = 1) uniform vec2 randomSeed;                                                                   \n"
+	"                                                                                                                \n"
+	"float rand(vec2 n)                                                                                              \n"
+	"{                                                                                                               \n"
+	"    return fract(sin(dot(n.xy, vec2(12.9898, 78.233))) * 43758.5453);                                           \n"
+	"}                                                                                                               \n"
+	"                                                                                                                \n"
+	"const float PI2 = 6.28318530718;                                                                                \n"
+	"                                                                                                                \n"
+	"void main(void)                                                                                                 \n"
+	"{                                                                                                               \n"
+	"    if(gl_GlobalInvocationID.x < addCount)                                                                      \n"
+	"    {                                                                                                           \n"
+	"        uint idx = atomicCounterIncrement(count);                                                               \n"
+	"        float rand1 = rand(randomSeed + vec2(float(gl_GlobalInvocationID.x * 2)));                              \n"
+	"        float rand2 = rand(randomSeed + vec2(float(gl_GlobalInvocationID.x * 2 + 1)));                          \n"
+	"        particles[idx].position = vec3(0, 0, 0);                                                                \n"
+	"        particles[idx].velocity = normalize(vec3(cos(rand1 * PI2), 5.0 + rand2 * 5.0, sin(rand1 * PI2))) * 0.15;\n"
+	"        particles[idx].lifeTime = 0;                                                                            \n"
+	"    }                                                                                                           \n"
+	"}                                                                                                               \n"
+};
+
+const char* update_cs_source[] =
+{
+	"#version 430 core                                                                                               \n"
+	"                                                                                                                \n"
+	"layout(local_size_x = 1000, local_size_y = 1, local_size_z = 1) in;                                             \n"
+	"                                                                                                                \n"
+	"struct Particle                                                                                                 \n"
+	"{                                                                                                               \n"
+	"    vec3 position;                                                                                              \n"
+	"    vec3 velocity;                                                                                              \n"
+	"    float lifeTime;                                                                                             \n"
+	"};                                                                                                              \n"
+	"                                                                                                                \n"
+	"layout(std140, binding=0) buffer InParticles                                                                    \n"
+	"{                                                                                                               \n"
+	"     Particle inParticles[1000];                                                                                \n"
+	"};                                                                                                              \n"
+	"                                                                                                                \n"
+	"layout(std140, binding=1) buffer OutParticles                                                                   \n"
+	"{                                                                                                               \n"
+	"     Particle outParticles[1000];                                                                               \n"
+	"};                                                                                                              \n"
+	"                                                                                                                \n"
+	"layout(binding = 0, offset = 0) uniform atomic_uint inCount;                                                    \n"
+	"layout(binding = 1, offset = 0) uniform atomic_uint outCount;                                                   \n"
+	"layout(location = 0) uniform float deltaTime;                                                                   \n"
+	"                                                                                                                \n"
+	"const vec3 windAccel = vec3(0.015, 0, 0);                                                                       \n"
+	"                                                                                                                \n"
+	"void main(void)                                                                                                 \n"
+	"{                                                                                                               \n"
+	"    uint idx = gl_GlobalInvocationID.x;                                                                         \n"
+	"    if(idx < atomicCounter(inCount))                                                                            \n"
+	"    {                                                                                                           \n"
+	"        float lifeTime = inParticles[idx].lifeTime + deltaTime;                                                 \n"
+	"        if(lifeTime < 10.0)                                                                                     \n"
+	"        {                                                                                                       \n"
+	"            uint outIdx = atomicCounterIncrement(outCount);                                                     \n"
+	"            outParticles[outIdx].position = inParticles[idx].position + inParticles[idx].velocity * deltaTime;  \n"
+	"            outParticles[outIdx].velocity = inParticles[idx].velocity + windAccel * deltaTime;                  \n"
+	"            outParticles[outIdx].lifeTime = lifeTime;                                                           \n"
+	"        }                                                                                                       \n"
+	"    }                                                                                                           \n"
+	"}                                                                                                               \n"
+};
+
+const char* render_vs_source[] =
+{
+	"#version 430 core                                                      \n"
+	"                                                                       \n"
+	"struct Particle                                                        \n"
+	"{                                                                      \n"
+	"    vec3 position;                                                     \n"
+	"    vec3 velocity;                                                     \n"
+	"    float lifeTime;                                                    \n"
+	"};                                                                     \n"
+	"                                                                       \n"
+	"layout(std140, binding=0) buffer Particles                             \n"
+	"{                                                                      \n"
+	"     Particle particles[1000];                                         \n"
+	"};                                                                     \n"
+	"                                                                       \n"
+	"layout(location = 0) uniform mat4 mv;                                  \n"
+	"                                                                       \n"
+	"out vec4 particlePosition;                                             \n"
+	"out float particleSize;                                                \n"
+	"out float particleAlpha;                                               \n"
+	"                                                                       \n"
+	"void main(void)                                                        \n"
+	"{                                                                      \n"
+	"    particlePosition = mv * vec4(particles[gl_VertexID].position, 1.0);\n"
+	"    float lifeTime = particles[gl_VertexID].lifeTime;                  \n"
+	"    particleSize = 10.0 + lifeTime * 0.02;                             \n"
+	"    particleAlpha = pow((10.0 - lifeTime) * 0.1, 7.0) * 0.7;           \n"
+	"}                                                                      \n"
+};
+
+const char* render_gs_source[] =
+{
+	"#version 430 core                                                               \n"
+	"                                                                                \n"
+	"layout(points, invocations = 1) in;                                             \n"
+	"layout(triangle_strip, max_vertices = 4) out;                                   \n"
+	"                                                                                \n"
+	"layout(location = 1) uniform mat4 p;                                            \n"
+	"                                                                                \n"
+	"in vec4 particlePosition[];                                                     \n"
+	"in float particleSize[];                                                        \n"
+	"in float particleAlpha[];                                                       \n"
+	"                                                                                \n"
+	"out float particleAlphaOut;                                                     \n"
+	"out vec2 texcoord;                                                              \n"
+	"                                                                                \n"
+	"void main(void)                                                                 \n"
+	"{                                                                               \n"
+	"    vec4 verts[4];                                                              \n"
+	"    verts[0] = p * (particlePosition[0] + vec4(-1, -1, 0, 0) * particleSize[0]);\n"
+	"    verts[1] = p * (particlePosition[0] + vec4(1, -1, 0, 0) * particleSize[0]); \n"
+	"    verts[2] = p * (particlePosition[0] + vec4(1, 1, 0, 0) * particleSize[0]);  \n"
+	"    verts[3] = p * (particlePosition[0] + vec4(-1, 1, 0, 0) * particleSize[0]); \n"
+	"                                                                                \n"
+	"    gl_Position = verts[0];                                                     \n"
+	"    particleAlphaOut = particleAlpha[0];                                        \n"
+	"    texcoord = vec2(0, 0);                                                      \n"
+	"    EmitVertex();                                                               \n"
+	"                                                                                \n"
+	"    gl_Position = verts[1];                                                     \n"
+	"    particleAlphaOut = particleAlpha[0];                                        \n"
+	"    texcoord = vec2(1, 0);                                                      \n"
+	"    EmitVertex();                                                               \n"
+	"                                                                                \n"
+	"    gl_Position = verts[3];                                                     \n"
+	"    particleAlphaOut = particleAlpha[0];                                        \n"
+	"    texcoord = vec2(0, 1);                                                      \n"
+	"    EmitVertex();                                                               \n"
+	"                                                                                \n"
+	"    gl_Position = verts[2];                                                     \n"
+	"    particleAlphaOut = particleAlpha[0];                                        \n"
+	"    texcoord = vec2(1, 1);                                                      \n"
+	"    EmitVertex();                                                               \n"
+	"                                                                                \n"
+	"    EndPrimitive();                                                             \n"
+	"}                                                                               \n"
+};
+
+const char* render_fs_source[] =
+{
+	"#version 430 core                                                 \n"
+	"                                                                  \n"
+	"layout(binding = 0) uniform sampler2D particleTex;                \n"
+	"                                                                  \n"
+	"layout(location = 0) out vec4 fragColor;                          \n"
+	"                                                                  \n"
+	"in float particleAlphaOut;                                        \n"
+	"in vec2 texcoord;                                                 \n"
+	"                                                                  \n"
+	"void main(void)                                                   \n"
+	"{                                                                 \n"
+	"    fragColor = texture(particleTex, texcoord) * particleAlphaOut;\n"
+	"}                                                                 \n"
+};
+
+void flame_init() {
+	// Create shader program for adding particles.
+	GLuint cs = glCreateShader(GL_COMPUTE_SHADER);
+	glShaderSource(cs, 1, add_cs_source, NULL);
+	glCompileShader(cs);
+	addProgram = glCreateProgram();
+	glAttachShader(addProgram, cs);
+	glLinkProgram(addProgram);
+	//printGLShaderLog(cs);
+
+	// Create shader program for updating particles. (from input to output)
+	GLuint update_cs = glCreateShader(GL_COMPUTE_SHADER);
+	glShaderSource(update_cs, 1, update_cs_source, NULL);
+	glCompileShader(update_cs);
+	updateProgram = glCreateProgram();
+	glAttachShader(updateProgram, update_cs);
+	glLinkProgram(updateProgram);
+	//printGLShaderLog(cs);
+
+	// Create shader program for rendering particles.
+	GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+	glShaderSource(vs, 1, render_vs_source, NULL);
+	glCompileShader(vs);
+	GLuint gs = glCreateShader(GL_GEOMETRY_SHADER);
+	glShaderSource(gs, 1, render_gs_source, NULL);
+	glCompileShader(gs);
+	GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+	glShaderSource(fs, 1, render_fs_source, NULL);
+	glCompileShader(fs);
+	renderProgram = glCreateProgram();
+	glAttachShader(renderProgram, vs);
+	glAttachShader(renderProgram, gs);
+	glAttachShader(renderProgram, fs);
+	glLinkProgram(renderProgram);
+	//printGLShaderLog(vs);
+	//printGLShaderLog(gs);
+	//printGLShaderLog(fs);
+
+	// Create shader storage buffers & indirect buffers. (which are also used as atomic counter buffers)
+	glGenBuffers(1, &particleIn.shaderStorageBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, particleIn.shaderStorageBuffer);
+	glBufferStorage(GL_SHADER_STORAGE_BUFFER, sizeof(Particle) * MAX_PARTICLE_COUNT, NULL, GL_DYNAMIC_STORAGE_BIT);
+
+	glGenBuffers(1, &particleIn.indirectBuffer);
+	glBindBuffer(GL_DRAW_INDIRECT_BUFFER, particleIn.indirectBuffer);
+	glBufferStorage(GL_DRAW_INDIRECT_BUFFER, sizeof(DrawArraysIndirectCommand), &defalutDrawArraysCommand, GL_DYNAMIC_STORAGE_BIT);
+
+	glGenBuffers(1, &particleOut.shaderStorageBuffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, particleOut.shaderStorageBuffer);
+	glBufferStorage(GL_SHADER_STORAGE_BUFFER, sizeof(Particle) * MAX_PARTICLE_COUNT, NULL, GL_DYNAMIC_STORAGE_BIT);
+
+	glGenBuffers(1, &particleOut.indirectBuffer);
+	glBindBuffer(GL_DRAW_INDIRECT_BUFFER, particleOut.indirectBuffer);
+	glBufferStorage(GL_DRAW_INDIRECT_BUFFER, sizeof(DrawArraysIndirectCommand), &defalutDrawArraysCommand, GL_DYNAMIC_STORAGE_BIT);
+
+	// Create particle texture.
+	texture_data textureData = loadImg("./smoke.jpg");
+	glGenTextures(1, &particleTexture);
+	glBindTexture(GL_TEXTURE_2D, particleTexture);
+	glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB8, textureData.width, textureData.height);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, textureData.width, textureData.height, GL_RGBA, GL_UNSIGNED_BYTE, textureData.data);
+	glGenerateMipmap(GL_TEXTURE_2D);
+	delete[] textureData.data;
+
+	// Create VAO. We don't have any input attributes, but this is still required.
+	glGenVertexArrays(1, &particle_vao);
+	glBindVertexArray(particle_vao);
+}
+
+void AddParticle(uint count)
+{
+	// Add count particles to input buffers.
+	glUseProgram(addProgram);
+	glUniform1ui(0, count);
+	glUniform2f(1, static_cast<float>(rand()), static_cast<float>(rand()));
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, particleIn.shaderStorageBuffer);
+	glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, particleIn.indirectBuffer);
+	glDispatchCompute(1, 1, 1);
+}
+
+void render_flame() {
+	//glm::mat4 model_matrix = translate(mat4(1.0f), vec3(78.1096f, 134.54f, -418.567f));
+	glm::vec3 scale = glm::vec3(200.0f, 200.0f, 200.0f);
+	model_matrix = glm::scale(model_matrix, scale);
+	// Update particles.
+	glUseProgram(updateProgram);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, particleIn.shaderStorageBuffer);
+	glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 0, particleIn.indirectBuffer);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, particleOut.shaderStorageBuffer);
+	glBindBufferBase(GL_ATOMIC_COUNTER_BUFFER, 1, particleOut.indirectBuffer);
+	glUniform1f(0, 0.016f); // We use a fixed update step of 0.016 seconds.
+	glNamedBufferSubData(particleOut.indirectBuffer, 0, sizeof(DrawArraysIndirectCommand), &defalutDrawArraysCommand);
+	glDispatchCompute(1, 1, 1);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glDepthMask(GL_FALSE); // Disable depth writing for additive blending. Remember to turn it on later...
+
+	// Draw particles using updated buffers using additive blending.
+	glBindVertexArray(particle_vao);
+	glUseProgram(renderProgram);
+	glUniformMatrix4fv(0, 1, GL_FALSE, value_ptr(view*model_matrix));
+	glUniformMatrix4fv(1, 1, GL_FALSE, value_ptr(projection));
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, particleTexture);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, particleOut.shaderStorageBuffer);
+	glBindBuffer(GL_DRAW_INDIRECT_BUFFER, particleOut.indirectBuffer);
+	glDrawArraysIndirect(GL_POINTS, 0);
+
+	glDisable(GL_BLEND);
+	glDepthMask(GL_TRUE);
+
+	// Swap input and output buffer.
+	std::swap(particleIn, particleOut);
+}
+
+
+/*---------------------------------------Particle Flame--------------------------------------*/
+
+
+
+
+/*----------------------------------------------- Water -----------------------------------------------*/
+struct WaterColumn
+{
+	float height;
+	float flow;
+};
+
+GLuint texture_env;
+GLuint program_water;
+GLuint program_drop;
+GLuint program_render;
+GLuint water_vao;
+mat4 mvp(1.0f);
+float timeElapsed = 0.0f;
+GLuint waterBufferIn;
+GLuint waterBufferOut;
+
+void AddDrop()
+{
+	// Randomly add a "drop" of water into the grid system.
+	glUseProgram(program_drop);
+	glUniform2ui(0, rand() % 180, rand() % 180);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, waterBufferIn);
+	glDispatchCompute(10, 10, 1);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+}
+
+void water_init()
+{
+	// Initialize random seed. Required in AddDrop() function.
+	srand(time(NULL));
+	{
+		program_drop = glCreateProgram();
+		GLuint cs = glCreateShader(GL_COMPUTE_SHADER);
+		char** water_drop_source = loadShaderSource("water_drop_cs.comp");
+		glShaderSource(cs, 1, water_drop_source, NULL);
+		freeShaderSource(water_drop_source);
+		glCompileShader(cs);
+		shaderLog(cs);
+		glAttachShader(program_drop, cs);
+		glLinkProgram(program_drop);
+	}
+	{
+		program_water = glCreateProgram();
+		GLuint cs = glCreateShader(GL_COMPUTE_SHADER);
+		char** water_source = loadShaderSource("water_cs.comp");
+		glShaderSource(cs, 1, water_source, NULL);
+		freeShaderSource(water_source);
+		glCompileShader(cs);
+		shaderLog(cs);
+		glAttachShader(program_water, cs);
+		glLinkProgram(program_water);
+	}
+	{
+		program_render = glCreateProgram();
+
+		GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+		char** water_render_vs_source = loadShaderSource("water_render.vs.glsl");
+		glShaderSource(vs, 1, water_render_vs_source, NULL);
+		freeShaderSource(water_render_vs_source);
+		glCompileShader(vs);
+		shaderLog(vs);
+
+		GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+		char** water_render_fs_source = loadShaderSource("water_render.fs.glsl");
+		glShaderSource(fs, 1, water_render_fs_source, NULL);
+		freeShaderSource(water_render_fs_source);
+		glCompileShader(fs);
+		shaderLog(fs);
+
+		glAttachShader(program_render, vs);
+		glAttachShader(program_render, fs);
+		glLinkProgram(program_render);
+	}
+	{
+		glGenTextures(1, &texture_env);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, texture_env);
+		for (int i = 0; i < 6; i++)
+		{
+			texture_data envmap_data = loadImg(faces[i].c_str());
+			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, envmap_data.width, envmap_data.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, envmap_data.data);
+		}
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+		glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+	}
+
+	// Create two water grid buffers of 180 * 180 water columns.
+	glGenBuffers(1, &waterBufferIn);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, waterBufferIn);
+	// Create initial data.
+	WaterColumn *data = new WaterColumn[32400];
+	for (int x = 0; x < 180; ++x)
+	{
+		for (int y = 0; y < 180; ++y)
+		{
+			int idx = y * 180 + x;
+			data[idx].height = 60.0f;
+			data[idx].flow = 0.0f;
+		}
+	}
+	glBufferStorage(GL_SHADER_STORAGE_BUFFER, sizeof(WaterColumn) * 32400, data, GL_DYNAMIC_STORAGE_BIT);
+	delete[] data;
+
+	glGenBuffers(1, &waterBufferOut);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, waterBufferOut);
+	glBufferStorage(GL_SHADER_STORAGE_BUFFER, sizeof(WaterColumn) * 32400, NULL, GL_DYNAMIC_STORAGE_BIT);
+
+	glGenVertexArrays(1, &water_vao);
+	glBindVertexArray(water_vao);
+
+	// Create an index buffer of 2 triangles, 6 vertices.
+	uint indices[] = { 0, 2, 3, 0, 3, 1 };
+	GLuint ebo;
+	glGenBuffers(1, &ebo);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+	glBufferStorage(GL_ELEMENT_ARRAY_BUFFER, sizeof(uint) * 6, indices, GL_DYNAMIC_STORAGE_BIT);
+
+	AddDrop();
+}
+
+bool move_y_axis = false;
+void water_rendering()
+{
+	mat4 model_matrix = mat4(1.0f);
+	glm::vec3 scale = glm::vec3(30, 0.1, 30);
+	model_matrix = glm::scale(model_matrix, scale);
+	if (move_y_axis)
+	{
+		model_matrix = translate(model_matrix, vec3(0.0, -0.1, 0.0));
+		move_y_axis = false;
+		//printf("Enter\n");
+		//model_matrix -= vec4(0.0, 1.0, 0.0, 0.0);
+	}
+
+	// Update water grid.
+	glUseProgram(program_water);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, waterBufferIn);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, waterBufferOut);
+	// Each group updates 18 * 18 of the grid. We need 10 * 10 groups in total.
+	glDispatchCompute(10, 10, 1);
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+	// Render water surface.
+	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
+
+	glBindVertexArray(water_vao);
+	glUseProgram(program_render);
+	glUniformMatrix4fv(0, 1, GL_FALSE, value_ptr(projection * view * model_matrix));
+	glUniform3f(1, 0, 120, 200);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, waterBufferOut);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, texture_env);
+	// Draw 179 * 179 triangles based on the 180 * 180 water grid.
+	glDrawElementsInstanced(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0, 179 * 179);
+
+	std::swap(waterBufferIn, waterBufferOut);
+}
+
+void time_function_of_water()
+{
+	timeElapsed += 0.016;
+	if (timeElapsed > 5.0f)
+	{
+		AddDrop();
+		timeElapsed = 0;
+		move_y_axis = true;
+	}
+}
+/*----------------------------------------------- Water -----------------------------------------------*/
+
+
+
+/*----- Sound Effect -----*/
+
+#include "../Externals/Include/irrKlang/irrKlang.h"
+
+void sound_init()
+{
+	irrklang::ISoundEngine *SoundEngine = irrklang::createIrrKlangDevice();
+	SoundEngine->play2D("gameMusic.mp3", false);
+}
+
+/*----- Sound Effect -----*/
+
+
+
+
+
 void My_Init()
 {
 	glClearColor(0.0f, 0.6f, 0.0f, 1.0f);
 	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+	//glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 	glDepthFunc(GL_LEQUAL);
+
+
+	program = glCreateProgram();
+	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	char** vertexShaderSource = loadShaderSource("vertex2.vs.glsl");
+	char** fragmentShaderSource = loadShaderSource("fragment2.fs.glsl");
+	glShaderSource(vertexShader, 1, vertexShaderSource, NULL);
+	glShaderSource(fragmentShader, 1, fragmentShaderSource, NULL);
+	freeShaderSource(vertexShaderSource);
+	freeShaderSource(fragmentShaderSource);
+	glCompileShader(vertexShader);
+	glCompileShader(fragmentShader);
+	shaderLog(vertexShader);
+	shaderLog(fragmentShader);
+	glAttachShader(program, vertexShader);
+	glAttachShader(program, fragmentShader);
+	glLinkProgram(program);
+	um4mvp = glGetUniformLocation(program, "um4mvp");
+	glUseProgram(program);
 
 	initScene();
 	skyboxInitFunction();
 	model_Init();
+
 	shadow_Init();
 
 	ssaoSetup();
@@ -1470,10 +3754,24 @@ void My_Init()
 	init_post_framebuffer();
 
 	Terrain_init();
+
+	water_init();
+
+	flame_init();
+
+	sound_init();
+
+	//init_particle();
 }
 
 void My_Display()
 {
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	view = lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+
+	cout <<  "Camera Positon : " << cameraPos.x << ", " << cameraPos.y << ", " << cameraPos.z << endl;
+	cout << "Camera Front : " << cameraFront.x << ", " << cameraFront.y << ", " << cameraFront.z << endl;
+	
 	//======================= Begin Shadow Depth Pas=================================
 	glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
 	glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
@@ -1485,13 +3783,12 @@ void My_Display()
 	glCullFace(GL_FRONT);
 	objModel.Draw(depth_program);
 
-	glUseProgram(depth_program);
-
-	model_matrix = translate(mat4(1.0), vec3());
-	model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
-	model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
-	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, value_ptr(model_matrix));
-	objhuman.Draw(depth_program);
+	//glUseProgram(depth_program);
+	//model_matrix = translate(mat4(1.0), vec3());
+	//model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
+	//model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
+	//glUniformMatrix4fv(modelLocation, 1, GL_FALSE, value_ptr(model_matrix));
+	//objhuman.Draw(depth_program);
 
 	glCullFace(GL_BACK);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -1503,42 +3800,41 @@ void My_Display()
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, FBO);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	// Which render buffer attachment is written
-	//glDrawBuffer(GL_COLOR_ATTACHMENT0);
-
-	SkyboxRendering();
-
-	if (texture_mode == 0) {
-		renderModel();
-	}
-	else if (texture_mode == 1) {
-		toon_Render();
-	}
-
-	renderScene();
-
-	Terrain_rendering();
+	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, mainFBO);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	//glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
 	SkyboxRendering();
 
-	if (texture_mode == 0) {
-		renderModel();
-	}
-	else if (texture_mode == 1) {
-		toon_Render();
-	}
+	if (running_man == 1) render_running_man();
 
 	renderScene();
 
+	//render_particle();
+
 	ssao_render();
 
+	if (running_man == 0) render_running_man();
+
 	Terrain_rendering();
+
+	water_rendering();
+
+	model_matrix = translate(mat4(1.0f), vec3(28.7069, 156.08, -408.051));
+	render_flame();
+
+	model_matrix = translate(mat4(1.0f), vec3(-65.3328f, 159.48f, -410.454f));
+	render_flame();
+
+	model_matrix = translate(mat4(1.0f), vec3(63.6831f, 177.116f, -247.728f));
+	render_flame();
+
+	model_matrix = translate(mat4(1.0f), vec3(-100.595f, 181.792f, -250.003f));
+	render_flame();
 	
 	post_render();
-
+	
     glutSwapBuffers();
 }
 
@@ -1550,13 +3846,25 @@ void My_Reshape(int width, int height)
 	viewportAspect = (float)width / (float)height;
 	projection = perspective(radians(45.0f), viewportAspect, 0.1f, 3000.f);
 
+	//mvp = perspective(radians(45.0f), viewportAspect, 0.1f, 3000.0f);
+	//mvp = mvp * lookAt(vec3(-2.0f, 1.0f, 0.0f), vec3(1.0f, 1.0f, 0.0f), vec3(0.0f, 1.0f, 0.0f));
+
+	//mvp = perspective(radians(45.0f), viewportAspect, 0.1f, 000.0f);
+
 	ssao_reshape_setup();
 
 	init_post_rbo();
+
 }
 
 void My_Timer(int val)
 {
+	// Emit 1 particle every 0.016 seconds.
+	AddParticle(10);
+
+	time_function_of_water();
+
+	timer_cnt += 3;
 	glutPostRedisplay();
 	glutTimerFunc(timer_speed, My_Timer, val);
 }
@@ -1629,6 +3937,14 @@ void My_Keyboard(unsigned char key, int x, int y)
 			texture_mode = 0;
 		}
 	}
+
+	if (key == 'q' || key == 'Q') {
+		running_man = !running_man;
+	}
+
+	if (key == 'e' || key == 'E') {
+		fall = SNOW;
+	}
 }
 
 void My_SpecialKeys(int key, int x, int y)
@@ -1643,6 +3959,19 @@ void My_SpecialKeys(int key, int x, int y)
 		break;
 	case GLUT_KEY_LEFT:
 		printf("Left arrow is pressed at (%d, %d)\n", x, y);
+		running_man_x -= 2.0f;
+		break;
+	case GLUT_KEY_RIGHT:
+		printf("Right arrow is pressed at (%d, %d)\n", x, y);
+		running_man_x += 2.0f;
+		break;
+	case GLUT_KEY_UP:
+		printf("Up arrow is pressed at (%d, %d)\n", x, y);
+		running_man_z += 2.0f;
+		break;
+	case GLUT_KEY_DOWN:
+		printf("Up arrow is pressed at (%d, %d)\n", x, y);
+		running_man_z -= 2.0f;
 		break;
 	default:
 		printf("Other special key is pressed at (%d, %d)\n", x, y);
@@ -1667,6 +3996,8 @@ void My_Menu(int id)
 	case MENU_EXIT:
 		exit(0);
 		break;
+
+	//post process and rendering effects
 	case '0':
 		mode = 0;
 		break;
@@ -1716,12 +4047,17 @@ int main(int argc, char *argv[])
 #ifdef _MSC_VER
 	glewInit();
 #endif
+	ilInit();
+	ilEnable(IL_ORIGIN_SET);
+	ilOriginFunc(IL_ORIGIN_LOWER_LEFT);
 	dumpInfo();
 	My_Init();
+	My_LoadModels();
 
 	// Create a menu and bind it to mouse right button.
 	int menu_main = glutCreateMenu(My_Menu);
 	int menu_timer = glutCreateMenu(My_Menu);
+	int menu_particle = glutCreateMenu(My_Menu);;
 
 	glutSetMenu(menu_main);
 	glutAddSubMenu("Timer", menu_timer);

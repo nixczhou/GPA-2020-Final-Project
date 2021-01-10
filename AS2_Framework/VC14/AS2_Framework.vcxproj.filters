@@ -14,5 +14,10 @@
     <None Include="..\Assets\post_fragment.fs.glsl" />
     <None Include="..\Assets\ssao.fs.glsl" />
     <None Include="..\Assets\ssao.vs.glsl" />
+    <None Include="..\Assets\depth.fs.glsl" />
+    <None Include="..\Assets\depth.vs.glsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="fbxloader.h" />
   </ItemGroup>
 </Project>

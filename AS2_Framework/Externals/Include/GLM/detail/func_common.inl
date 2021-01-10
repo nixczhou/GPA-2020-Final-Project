@@ -582,7 +582,7 @@ namespace detail
 	}
 
 #	if GLM_HAS_CXX11_STL
-		using std::isnan;
+		
 #	else
 		template<typename genType>
 		GLM_FUNC_QUALIFIER bool isnan(genType x)

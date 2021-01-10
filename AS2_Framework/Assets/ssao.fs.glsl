@@ -54,7 +54,7 @@ void main()
 			vec3 T = normalize(randvec - N * dot(randvec, N));
 			vec3 B = cross(N, T);
 			mat3 tbn = mat3(T, B, N); // tangent to eye matrix
-			const float radius = 50.0;
+			const float radius = 10.0;
 			float ao = 0.0;
 			for (int i = 0; i < numKernels; ++i)
 			{
