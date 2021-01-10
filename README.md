@@ -6,12 +6,12 @@
 - [x]  Shadow Map 5
 - [ ]  ~~Toon shading 5~~ (放棄)
 - [X]  Framebuffer 5
-- [ ]  Environment mapping 5
+- [X]  Environment mapping 5
 - [ ]  Normal mapping 5
-- [ ]  Terrain 10
-- [ ]  FBX Animation 10
+- [X]  Terrain 10
+- [X]  FBX Animation 10
 - [X]  SSAO 10
 ### Adv :
-- [ ]  Water 10
-- [ ]  Particle 10
+- [X]  Water 10
+- [X]  Particle 10
 - [ ]  Cascade 10
