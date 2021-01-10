@@ -1691,7 +1691,6 @@ GLuint kernal_ubo;
 GLuint plane_vao;
 GLuint noise_map;
 
-GLuint tex_toon;
 
 struct
 {
@@ -1765,200 +1764,188 @@ typedef struct Mesh {
 	vector<Texture> textures;
 	GLuint vao, vbo, ebo;
 
-	Mesh() : vao(0), vbo(0), ebo(0) {}
-
-	Mesh(const vector<Vertex> &vertexData, const vector<Texture> &textures, const vector<GLuint> &indices) : vao(0), vbo(0), ebo(0) {
-		setData(vertexData, textures, indices);
+	Mesh() {
+		vao = 0;
+		vbo = 0;
+		ebo = 0;
 	}
-	void setData(const std::vector<Vertex>& vertData,
-		const std::vector<Texture> & textures,
-		const std::vector<GLuint>& indices)
+
+	void setData(vector<Vertex>& vertData, vector<Texture> & textures, vector<GLuint>& indices)
 	{
 		this->vertexData = vertData;
 		this->indices = indices;
 		this->textures = textures;
-		if (!vertData.empty() && !indices.empty())
+		if (!vertData.empty())
 		{
-			this->SetUpMesh();
+			if (!indices.empty()) {
+				unsigned int vertex_size = sizeof(Vertex);
+				unsigned int gluint_size = sizeof(GLuint);
+				unsigned int real_f = sizeof(GL_FLOAT);
+				GLvoid* first = (GLvoid*)(0);
+				GLvoid* second = (GLvoid*)(3 * real_f);
+				GLvoid* third = (GLvoid*)(5 * real_f);
+				GLvoid* fourth = (GLvoid*)(8 * real_f);
+				size_t v_size =  vertex_size * vertexData.size();
+				size_t i_size = gluint_size * indices.size();
+
+				glGenVertexArrays(1, &vao);
+				glGenBuffers(1, &vbo);
+				glGenBuffers(1, &ebo);
+
+				glBindVertexArray(vao);
+				glBindBuffer(GL_ARRAY_BUFFER, vbo);
+				glBufferData(GL_ARRAY_BUFFER, v_size, &vertexData[0], GL_STATIC_DRAW);
+
+				glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertex_size, first);
+				glEnableVertexAttribArray(0);
+
+				glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, vertex_size, second);
+				glEnableVertexAttribArray(1);
+
+				glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, vertex_size, third);
+				glEnableVertexAttribArray(2);
+
+				glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, vertex_size, fourth);
+				glEnableVertexAttribArray(3);
+
+
+				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+				glBufferData(GL_ELEMENT_ARRAY_BUFFER, i_size, &indices[0], GL_STATIC_DRAW);
+
+				glBindBuffer(GL_ARRAY_BUFFER, 0);
+				glBindVertexArray(0);
+			}
 		}
 	}
 	void Draw(GLuint program) const
 	{
-		if (vao == 0 || vbo == 0 || ebo == 0)
+		if(vao == 0) {
 			return;
+			if(vbo == 0) {
+				return;
+				if (ebo == 0) {
+					return;
+				}
+			}
+		}
 
 		glUseProgram(program);
 		glBindVertexArray(vao);
 
 		int diffuseCnt = 0, specularCnt = 0, textUnitCnt = 0;
 
-		for (vector<Texture>::const_iterator it = textures.begin(); it != textures.end(); it++) {
+		vector<Texture>::const_iterator it = textures.begin();
+
+		while(it != textures.end()) {
 			stringstream samplerNameStr;
-			switch (it->type)
-			{
-			case aiTextureType_DIFFUSE:
-				glActiveTexture(GL_TEXTURE0);
-				glBindTexture(GL_TEXTURE_2D, it->id);
-
+			if (it->type == aiTextureType_DIFFUSE) {
 				samplerNameStr << "texture_diffuse0";
-				glUniform1i(glGetUniformLocation(program,
-					samplerNameStr.str().c_str()), 0);
-
-				break;
-			case aiTextureType_HEIGHT:
-				glActiveTexture(GL_TEXTURE1);
-				glBindTexture(GL_TEXTURE_2D, it->id);
-
-				samplerNameStr << "texture_normal0";
-				glUniform1i(glGetUniformLocation(program,
-					samplerNameStr.str().c_str()), 1);
-
-				break;
-			default:
-				std::cerr << "Warning::Mesh::draw, texture type" << it->type
-					<< " current not supported." << std::endl;
-				break;
+				GLuint diff_loc = glGetUniformLocation(program, samplerNameStr.str().c_str());
+				GLuint id = it->id;
+				glActiveTexture(GL_TEXTURE0);
+				glBindTexture(GL_TEXTURE_2D, id);
+				glUniform1i(diff_loc, 0);
 			}
+			else if (it->type == aiTextureType_HEIGHT) {
+				samplerNameStr << "texture_normal0";
+				GLuint height_loc = glGetUniformLocation(program, samplerNameStr.str().c_str());
+				GLuint id = it->id;
+				glActiveTexture(GL_TEXTURE1);
+				glBindTexture(GL_TEXTURE_2D, id);
+				glUniform1i(height_loc, 1);
+			}
+			it++;
 		}
 		glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
 		glBindVertexArray(0);
 		glUseProgram(0);
 	}
-	void final() const
-	{
-		glDeleteVertexArrays(1, &this->vao);
-		glDeleteBuffers(1, &this->vbo);
-		glDeleteBuffers(1, &this->ebo);
-	}
 
-	void SetUpMesh() {
-		glGenVertexArrays(1, &vao);
-		glGenBuffers(1, &vbo);
-		glGenBuffers(1, &ebo);
-
-		glBindVertexArray(vao);
-		glBindBuffer(GL_ARRAY_BUFFER, vbo);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(Vertex) * vertexData.size(), &vertexData[0], GL_STATIC_DRAW);
-
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)0);
-		glEnableVertexAttribArray(0);
-
-		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)(3 * sizeof(GL_FLOAT)));
-		glEnableVertexAttribArray(1);
-
-		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)(5 * sizeof(GL_FLOAT)));
-		glEnableVertexAttribArray(2);
-
-		glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid*)(8 * sizeof(GL_FLOAT)));
-		glEnableVertexAttribArray(3);
-
-
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GLuint) * indices.size(), &indices[0], GL_STATIC_DRAW);
-
-		glBindBuffer(GL_ARRAY_BUFFER, 0);
-		glBindVertexArray(0);
-
-	}
 } Mesh;
 
 typedef struct TextureHelper {
-	static  GLuint load2DTexture(const char* filename, GLint internalFormat = GL_RGBA8,
-		GLenum picFormat = GL_RGBA)
+	static  GLuint load2DTexture(const char* filename)
 	{
 		printf("filename : %s\n", filename);
 		GLuint textureId = 0;
 		glGenTextures(1, &textureId);
-		glBindTexture(GL_TEXTURE_2D, textureId);
+		glBindTexture(0x0DE1, textureId);
 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glTexParameteri(0x0DE1, 0x2802, 0x2901);
+		glTexParameteri(0x0DE1, 0x2803, 0x2901);
 
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+		glTexParameteri(0x0DE1, 0x2800, 0x2601);
+		glTexParameteri(0x0DE1, 0x2801, 0x2701);
 
-		TextureData imageTexData;
-		GLubyte *imageData = NULL;
-		int picWidth, picHeight;
-		int channels = 0;
-
-		imageTexData = loadPNG(filename);
-		imageData = imageTexData.data;
-
-		if (imageData == NULL)
-		{
-			std::cerr << "Error::Texture could not load texture file:" << filename << std::endl;
-			return 0;
-		}
+		TextureData imageTexData = loadPNG(filename);
+		int imageWidth = imageTexData.width;
+		int imageHeight = imageTexData.height;
 		//printf("Loaded image with width[%d], height[%d]\n", imageTexData.width, imageTexData.height);
-		glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, imageTexData.width, imageTexData.height,
-			0, picFormat, GL_UNSIGNED_BYTE, imageData);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, imageWidth, imageHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, imageTexData.data);
 
+		glGenerateMipmap(0x0DE1);
 
-		glGenerateMipmap(GL_TEXTURE_2D);
-
-		glBindTexture(GL_TEXTURE_2D, 0);
+		glBindTexture(0x0DE1, 0);
 		return textureId;
 	}
 #define FOURCC_DXT1 0x31545844 
 #define FOURCC_DXT3 0x33545844 
 #define FOURCC_DXT5 0x35545844 
 
+#define EMPAT 4
+#define SATUDUAEMPAT 124
+
 	static GLuint loadDDS(const char * filename) {
 
 
 		/* try to open the file */
 		std::ifstream file(filename, std::ios::in | std::ios::binary);
-		if (!file) {
-			std::cout << "Error::loadDDs, could not open:"
-				<< filename << "for read." << std::endl;
-			return 0;
-		}
 
 		/* verify the type of file */
-		char filecode[4];
-		file.read(filecode, 4);
-		if (strncmp(filecode, "DDS ", 4) != 0) {
-			std::cout << "Error::loadDDs, format is not dds :"
-				<< filename << std::endl;
-			file.close();
-			return 0;
-		}
+		char filecode[EMPAT];
+		file.read(filecode, EMPAT);
 
 		/* get the surface desc */
-		char header[124];
-		file.read(header, 124);
+		char header[SATUDUAEMPAT];
+		file.read(header, SATUDUAEMPAT);
 
 		unsigned int height = *(unsigned int*)&(header[8]);
 		unsigned int width = *(unsigned int*)&(header[12]);
-		unsigned int linearSize = *(unsigned int*)&(header[16]);
-		unsigned int mipMapCount = *(unsigned int*)&(header[24]);
-		unsigned int fourCC = *(unsigned int*)&(header[80]);
 
-
-		char * buffer = NULL;
 		unsigned int bufsize;
-		/* how big is it going to be including all mipmaps? */
-		bufsize = mipMapCount > 1 ? linearSize * 2 : linearSize;
-		buffer = new char[bufsize];
+		if (*(unsigned int*)&(header[24]) > 1) {
+			bufsize = *(unsigned int*)&(header[16]) * 2;
+		}
+		else {
+			bufsize = *(unsigned int*)&(header[16]);
+		}
+
+		char * buffer = new char[bufsize];
+
 		file.read(buffer, bufsize);
-		/* close the file pointer */
 		file.close();
 
-		unsigned int components = (fourCC == FOURCC_DXT1) ? 3 : 4;
+		unsigned int components;
+
+		if (*(unsigned int*)&(header[80]) == 0x31545844) {
+			components = 3;
+		}
+		else {
+			components = 4;
+		}
+
 		unsigned int format;
-		switch (fourCC)
-		{
-		case FOURCC_DXT1:
-			format = GL_COMPRESSED_RGBA_S3TC_DXT1_EXT;
-			break;
-		case FOURCC_DXT3:
-			format = GL_COMPRESSED_RGBA_S3TC_DXT3_EXT;
-			break;
-		case FOURCC_DXT5:
-			format = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
-			break;
-		default:
+
+		if (*(unsigned int*)&(header[80]) == 0x31545844) {
+			format = 0x83F1;
+		}
+		else if (*(unsigned int*)&(header[80]) == 0x33545844) {
+			format = 0x83F2;
+		}
+		else if (*(unsigned int*)&(header[80]) == 0x35545844) {
+			format = 0x83F3;
+		}
+		else {
 			delete[] buffer;
 			return 0;
 		}
@@ -1968,27 +1955,40 @@ typedef struct TextureHelper {
 		glGenTextures(1, &textureID);
 
 		// "Bind" the newly created texture : all future texture functions will modify this texture
-		glBindTexture(GL_TEXTURE_2D, textureID);
-		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		glBindTexture(0x0DE1, textureID);
+		glPixelStorei(0x0CF5, 1);
 
-		unsigned int blockSize = (format == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT) ? 8 : 16;
+		unsigned int blockSize;
+
+		if (format == 0x83F1) {
+			blockSize = 8;
+		}
+		else {
+			blockSize = 16;
+		}
+		
 		unsigned int offset = 0;
-
-		/* load the mipmaps */
-		for (unsigned int level = 0; level < mipMapCount && (width || height); ++level)
+		unsigned int level = 0;
+		
+		while (level < *(unsigned int*)&(header[24]) && (width || height))
 		{
-			unsigned int size = ((width + 3) / 4)*((height + 3) / 4)*blockSize;
-			glCompressedTexImage2D(GL_TEXTURE_2D, level, format, width, height,
-				0, size, buffer + offset);
-
-			offset += size;
-			width /= 2;
-			height /= 2;
+			glCompressedTexImage2D(0x0DE1, level, format, width, height, 0, ((width + 3) / 4)*((height + 3) / 4)*blockSize, buffer + offset);
+			offset += ((width + 3) / 4)*((height + 3) / 4)*blockSize;
+			width = width / 2;
+			height = height / 2;
 
 			// Deal with Non-Power-Of-Two textures. This code is not included in the webpage to reduce clutter.
-			if (width < 1) width = 1;
-			if (height < 1) height = 1;
-
+			if (width < 1) {
+				if (1) {
+					width = 1;
+				}
+			}
+			if (height < 1) {
+				if (1) {
+					height = 1;
+				}
+			}
+			++level;
 		}
 
 		delete[] buffer;
@@ -2000,30 +2000,35 @@ typedef struct TextureHelper {
 	{
 		TextureData texture;
 		int components;
-
 		// load the texture with stb image, force RGBA (4 components required)
 		stbi_uc *data = stbi_load(pngFilepath, &texture.width, &texture.height, &components, 4);
 
+		int texture_width = texture.width;
+		int texture_height = texture.height;
 		// is the image successfully loaded?
 		if (data != NULL)
 		{
-			// copy the raw data
-			size_t dataSize = texture.width * texture.height * 4 * sizeof(unsigned char);
-			texture.data = new unsigned char[dataSize];
-			memcpy(texture.data, data, dataSize);
+			texture.data = new unsigned char[texture_width * texture_height * 4 * sizeof(unsigned char)];
+			memcpy(texture.data, data, texture_width * texture_height * 4 * sizeof(unsigned char));
 
+			size_t i = 0;
+			size_t j = 0;
+			size_t k = 0;
 			// mirror the image vertically to comply with OpenGL convention
-			for (size_t i = 0; i < texture.width; ++i)
+			while (i < texture.width)
 			{
-				for (size_t j = 0; j < texture.height / 2; ++j)
+				j = 0;
+				while (j < texture_height / 2)
 				{
-					for (size_t k = 0; k < 4; ++k)
+					k = 0;
+					while (k < 4)
 					{
-						size_t coord1 = (j * texture.width + i) * 4 + k;
-						size_t coord2 = ((texture.height - j - 1) * texture.width + i) * 4 + k;
-						std::swap(texture.data[coord1], texture.data[coord2]);
+						std::swap(texture.data[(j * texture_width + i) * 4 + k], texture.data[((texture_height - j - 1) * texture_width + i) * 4 + k]);
+						++k;
 					}
+					++j;
 				}
+				++i;
 			}
 
 			// release the loaded image
@@ -2042,104 +2047,130 @@ typedef struct Model {
 
 	bool processNode(const aiNode* node, const aiScene* sceneObjPtr)
 	{
-		if (!node || !sceneObjPtr)
+		if (!node)
 		{
+			if (!sceneObjPtr) {
+				return false;
+			}
 			return false;
 		}
 
-		for (size_t i = 0; i < node->mNumMeshes; ++i)
+		size_t i = 0;
+		while (i < node->mNumMeshes)
 		{
-
-			const aiMesh* meshPtr = sceneObjPtr->mMeshes[node->mMeshes[i]];
-			if (meshPtr)
+			unsigned int mMeshes_i = node->mMeshes[i];
+			const aiMesh* meshPtr = sceneObjPtr->mMeshes[mMeshes_i];
+			if (meshPtr != NULL)
 			{
 				Mesh meshObj;
-				if (this->processMesh(meshPtr, sceneObjPtr, meshObj))
+				if (this->processMesh(meshPtr, sceneObjPtr, meshObj) == true)
 				{
 					this->meshes.push_back(meshObj);
 				}
 			}
+			++i;
 		}
 
-		for (size_t i = 0; i < node->mNumChildren; ++i)
+		i = 0;
+		while (i < node->mNumChildren)
 		{
-			this->processNode(node->mChildren[i], sceneObjPtr);
+			aiNode* mChildren_i = node->mChildren[i];
+			this->processNode(mChildren_i, sceneObjPtr);
+			++i;
 		}
 		return true;
 	}
+
 	bool processMesh(const aiMesh* meshPtr, const aiScene* sceneObjPtr, Mesh& meshObj)
 	{
-		if (!meshPtr || !sceneObjPtr)
+		if (!meshPtr)
 		{
+			if (!sceneObjPtr) {
+				return false;
+			}
 			return false;
 		}
 		std::vector<Vertex> vertData;
 		std::vector<Texture> textures;
 		std::vector<GLuint> indices;
 
-		for (size_t i = 0; i < meshPtr->mNumVertices; ++i)
+		unsigned int mNumVertices = meshPtr->mNumVertices;
+
+		size_t i = 0;
+		while (i < mNumVertices)
 		{
 			Vertex vertex;
-
-			if (meshPtr->HasPositions())
+			bool HasPositions = meshPtr->HasPositions();
+			bool HasTextureCoords = meshPtr->HasTextureCoords(0);
+			bool HasNormals = meshPtr->HasNormals();
+			bool HasTangentsAndBitangents = meshPtr->HasTangentsAndBitangents();
+			if (HasPositions)
 			{
 				//glm::mat4 r = rotate(mat4(), radians(rotateAngle), vec3(1.0, 0.0, 0.0));
-				vertex.position.x = meshPtr->mVertices[i].x;
-				vertex.position.y = meshPtr->mVertices[i].y;
-				vertex.position.z = meshPtr->mVertices[i].z;
+				aiVector3D mVertices = meshPtr->mVertices[i];
+				vertex.position.x = mVertices.x;
+				vertex.position.y = mVertices.y;
+				vertex.position.z = mVertices.z;
 
 				//vertex.position = vec3(r * vec4(vertex.position, 1.0));
 			}
 
-			if (meshPtr->HasTextureCoords(0))
+			if (HasTextureCoords)
 			{
-				vertex.texCoords.x = meshPtr->mTextureCoords[0][i].x;
-				vertex.texCoords.y = meshPtr->mTextureCoords[0][i].y;
+				aiVector3D mTextureCoords = meshPtr->mTextureCoords[0][i];
+				vertex.texCoords.x = mTextureCoords.x;
+				vertex.texCoords.y = mTextureCoords.y;
 			}
 			else
 			{
-				vertex.texCoords = glm::vec2(0.0f, 0.0f);
+				vertex.texCoords = vec2(0.0f, 0.0f);
 			}
 
-			if (meshPtr->HasNormals())
+			if (HasNormals)
 			{
-				vertex.normal.x = meshPtr->mNormals[i].x;
-				vertex.normal.y = meshPtr->mNormals[i].y;
-				vertex.normal.z = meshPtr->mNormals[i].z;
+				aiVector3D mNormals = meshPtr->mNormals[i];
+				vertex.normal.x = mNormals.x;
+				vertex.normal.y = mNormals.y;
+				vertex.normal.z = mNormals.z;
 			}
-			if (meshPtr->HasTangentsAndBitangents())
+			if (HasTangentsAndBitangents)
 			{
-				vertex.tangent.x = meshPtr->mTangents[i].x;
-				vertex.tangent.y = meshPtr->mTangents[i].y;
-				vertex.tangent.z = meshPtr->mTangents[i].z;
+				aiVector3D mTangents = meshPtr->mTangents[i];
+				vertex.tangent.x = mTangents.x;
+				vertex.tangent.y = mTangents.y;
+				vertex.tangent.z = mTangents.z;
 			}
 			vertData.push_back(vertex);
+			++i;
 		}
 
-		for (size_t i = 0; i < meshPtr->mNumFaces; ++i)
+		i = 0;
+		while ( i < meshPtr->mNumFaces)
 		{
-			aiFace face = meshPtr->mFaces[i];
-			if (face.mNumIndices != 3)
+			unsigned int mNumIndices = meshPtr->mFaces[i].mNumIndices;
+			if (mNumIndices != 3)
 			{
 				std::cerr << "Error:Model::processMesh, mesh not transformed to triangle mesh." << std::endl;
 				return false;
 			}
-			for (size_t j = 0; j < face.mNumIndices; ++j)
+			size_t j = 0;
+			while (j < mNumIndices)
 			{
-				indices.push_back(face.mIndices[j]);
+				indices.push_back(meshPtr->mFaces[i].mIndices[j]);
+				++j;
 			}
+			++i;
 		}
 
-		if (meshPtr->mMaterialIndex >= 0)
+		unsigned int mMaterialIndex = meshPtr->mMaterialIndex;
+		if (mMaterialIndex >= 0)
 		{
-			const aiMaterial* materialPtr = sceneObjPtr->mMaterials[meshPtr->mMaterialIndex];
-
 			std::vector<Texture> diffuseTexture;
-			this->processMaterial(materialPtr, sceneObjPtr, aiTextureType_DIFFUSE, diffuseTexture);
+			this->processMaterial(sceneObjPtr->mMaterials[mMaterialIndex], sceneObjPtr, aiTextureType_DIFFUSE, diffuseTexture);
 			textures.insert(textures.end(), diffuseTexture.begin(), diffuseTexture.end());
 
 			std::vector<Texture> normalTexture;
-			this->processMaterial(materialPtr, sceneObjPtr, aiTextureType_HEIGHT, normalTexture);
+			this->processMaterial(sceneObjPtr->mMaterials[mMaterialIndex], sceneObjPtr, aiTextureType_HEIGHT, normalTexture);
 			textures.insert(textures.end(), normalTexture.begin(), normalTexture.end());
 		}
 		meshObj.setData(vertData, textures, indices);
@@ -2148,68 +2179,69 @@ typedef struct Model {
 	/*
 	* Get mesh of texture
 	*/
-	bool processMaterial(const aiMaterial* matPtr, const aiScene* sceneObjPtr,
-		const aiTextureType textureType, std::vector<Texture>& textures)
+	bool processMaterial(const aiMaterial* matPtr, const aiScene* sceneObjPtr, const aiTextureType textureType, std::vector<Texture>& textures)
 	{
 		textures.clear();
 
-		if (!matPtr
-			|| !sceneObjPtr)
+		if (!matPtr)
 		{
+			if (!sceneObjPtr) {
+				return false;
+			}
 			return false;
 		}
-		if (matPtr->GetTextureCount(textureType) <= 0)
+
+		unsigned int GetTextureCount = matPtr->GetTextureCount(textureType);
+		if (GetTextureCount <= 0)
 		{
 			return true;
 		}
-		for (size_t i = 0; i < matPtr->GetTextureCount(textureType); ++i)
+
+		size_t i = 0;
+		while (i < matPtr->GetTextureCount(textureType))
 		{
 			Texture text;
 			aiString textPath;
-			aiReturn retStatus = matPtr->GetTexture(textureType, i, &textPath);
-			if (retStatus != aiReturn_SUCCESS
-				|| textPath.length == 0)
+			if (matPtr->GetTexture(textureType, i, &textPath) != aiReturn_SUCCESS || textPath.length == 0)
 			{
 				std::cerr << "Warning, load texture type=" << textureType
 					<< "index= " << i << " failed with return value= "
-					<< retStatus << std::endl;
+					<< matPtr->GetTexture(textureType, i, &textPath) << std::endl;
 				continue;
 			}
+			text.path = this->modelFileDir + "/" + textPath.C_Str();
+			text.type = textureType;
 			//cout << textPath.C_Str() << "\n";
-			std::string absolutePath = this->modelFileDir + "/" + textPath.C_Str();
-			LoadedTextMapType::const_iterator it = this->loadedTextureMap.find(absolutePath);
+			LoadedTextMapType::const_iterator it = this->loadedTextureMap.find(this->modelFileDir + "/" + textPath.C_Str());
 			if (it == this->loadedTextureMap.end())
 			{
-				GLuint textId = TextureHelper::load2DTexture(absolutePath.c_str());
+				GLuint textId = TextureHelper::load2DTexture((this->modelFileDir + "/" + textPath.C_Str()).c_str());
 				text.id = textId;
-				text.path = absolutePath;
-				text.type = textureType;
 				textures.push_back(text);
-				loadedTextureMap[absolutePath] = text;
+				loadedTextureMap[this->modelFileDir + "/" + textPath.C_Str()] = text;
 			}
 			else
 			{
 				textures.push_back(it->second);
 			}
+			++i;
 		}
 		return true;
 	}
 
 	void Draw(GLuint program) const
 	{
-		for (std::vector<Mesh>::const_iterator it = this->meshes.begin(); this->meshes.end() != it; ++it)
+		std::vector<Mesh>::const_iterator it = this->meshes.begin();
+		while( this->meshes.end() != it)
 		{
 			it->Draw(program);
+			++it;
 		}
 	}
+
 	bool loadModel(const std::string& filePath)
 	{
 		Assimp::Importer importer;
-		if (filePath.empty())
-		{
-			std::cerr << "Error:Model::loadModel, empty model file path." << std::endl;
-			return false;
-		}
 
 		const aiScene* sceneObjPtr = importer.ReadFile(
 			filePath.c_str(),
@@ -2222,38 +2254,36 @@ typedef struct Model {
 			aiProcess_JoinIdenticalVertices |
 			aiProcess_SortByPType
 		);
-		if (!sceneObjPtr
-			|| sceneObjPtr->mFlags == AI_SCENE_FLAGS_INCOMPLETE
-			|| !sceneObjPtr->mRootNode)
-		{
-			std::cerr << "Error:Model::loadModel, description: "
-				<< importer.GetErrorString() << std::endl;
-			return false;
-		}
 		this->modelFileDir = filePath.substr(0, filePath.find_last_of('/'));
 		if (!this->processNode(sceneObjPtr->mRootNode, sceneObjPtr))
 		{
 			std::cerr << "Error:Model::loadModel, process node failed." << std::endl;
-			return false;
+			if (1) {
+				return false;
+			}
 		}
 		return true;
 	}
 	~Model()
 	{
-		for (std::vector<Mesh>::const_iterator it = this->meshes.begin(); this->meshes.end() != it; ++it)
+		std::vector<Mesh>::const_iterator it = this->meshes.begin();
+		while (this->meshes.end() != it)
 		{
-			it->final();
+			glDeleteVertexArrays(1, &it->vao);
+			glDeleteBuffers(1, &it->vbo);
+			glDeleteBuffers(1, &it->ebo);
+			++it;
 		}
 	}
 } Model;
 
 Model objModel;
-Model objhuman;
+Model objPokemon;
+Model objCharmander;
 // ---------------------------------------------------- Loader ---------------------------------------------------->
 
 
 GLuint lightSpaceMatrixLocation;
-GLuint modelLocation;
 
 GLuint depthMapFBO;
 GLuint depthMap;
@@ -2262,114 +2292,41 @@ GLuint depthMapLocation;
 void shadow_Init()
 {
 	depth_program = glCreateProgram();
-
-	GLuint depth_vertexShader = glCreateShader(GL_VERTEX_SHADER);
-	GLuint depth_fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-
-	char** depth_vertexShaderSource = loadShaderSource("depth.vs.glsl");
-	char** depth_fragmentShaderSource = loadShaderSource("depth.fs.glsl");
-
-	glShaderSource(depth_vertexShader, 1, depth_vertexShaderSource, NULL);
-	glShaderSource(depth_fragmentShader, 1, depth_fragmentShaderSource, NULL);
-
-	freeShaderSource(depth_vertexShaderSource);
-	freeShaderSource(depth_fragmentShaderSource);
-
-	glCompileShader(depth_vertexShader);
-	glCompileShader(depth_fragmentShader);
-
-	shaderLog(depth_vertexShader);
-	shaderLog(depth_fragmentShader);
-
-	glAttachShader(depth_program, depth_vertexShader);
-	glAttachShader(depth_program, depth_fragmentShader);
+	GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+	GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+	char** vertexShaderSource = loadShaderSource("depth.vs.glsl");
+	char** fragmentShaderSource = loadShaderSource("depth.fs.glsl");
+	glShaderSource(vertexShader, 1, vertexShaderSource, NULL);
+	glShaderSource(fragmentShader, 1, fragmentShaderSource, NULL);
+	freeShaderSource(vertexShaderSource);
+	freeShaderSource(fragmentShaderSource);
+	glCompileShader(vertexShader);
+	glCompileShader(fragmentShader);
+	shaderLog(vertexShader);
+	shaderLog(fragmentShader);
+	glAttachShader(depth_program, vertexShader);
+	glAttachShader(depth_program, fragmentShader);
 	glLinkProgram(depth_program);
-	//glUseProgram(depth_program);
-
-	lightSpaceMatrixLocation = glGetUniformLocation(depth_program, "lightSpaceMatrix");
-	modelLocation = glGetUniformLocation(depth_program, "model");
 
 	// Gen FBO
 	glGenFramebuffers(1, &depthMapFBO);
 	// Gen texture
 	glGenTextures(1, &depthMap);
-	glBindTexture(GL_TEXTURE_2D, depthMap);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,
-		SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glBindTexture(0x0DE1, depthMap);
+	glTexImage2D(0x0DE1, 0, 0x1902,
+		SHADOW_WIDTH, SHADOW_HEIGHT, 0, 0x1902, 0x1406, NULL);
+	glTexParameteri(0x0DE1, 0x2801, 0x2601);
+	glTexParameteri(0x0DE1, 0x2800, 0x2601);
+	glTexParameteri(0x0DE1, 0x2802, 0x2901);
+	glTexParameteri(0x0DE1, 0x2803, 0x2901);
 	// Attach to FBO
-	glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
-	glDrawBuffer(GL_NONE);
-	glReadBuffer(GL_NONE);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(0x8D40, depthMapFBO);
+	glFramebufferTexture2D(0x8D40, 0x8D00, 0x0DE1, depthMap, 0);
+	glDrawBuffer(0);
+	glReadBuffer(0);
+	glBindFramebuffer(0x8D40, 0);
 }
 
-
-/*-----------------------------------------------Toon Shading and Model Part-----------------------------------------------*/
-
-void toon_Init() {
-	uniforms.toon.mv_matrix = glGetUniformLocation(model_program, "mv_matrix");
-	uniforms.toon.proj_matrix = glGetUniformLocation(model_program, "proj_matrix");
-
-	static const GLubyte toon_tex_data[] =
-	{
-		//0x44, 0x00, 0x00, 0x00,
-		//0x88, 0x00, 0x00, 0x00,
-		//0xCC, 0x00, 0x00, 0x00,
-		//0xFF, 0x00, 0x00, 0x00
-		0xC5, 0xB3, 0x58, 0x00,
-		0xCF, 0xB5, 0x3B, 0x00,
-		0xD4, 0xAF, 0x37, 0x00,
-		0xFF, 0xDF, 0x00, 0x00
-	};
-
-	glGenTextures(1, &tex_toon);
-	glBindTexture(GL_TEXTURE_1D, tex_toon);
-	glTexImage1D(GL_TEXTURE_1D, 0,
-		GL_RGBA, sizeof(toon_tex_data) / 4, 0,
-		GL_RGBA, GL_UNSIGNED_BYTE,
-		toon_tex_data);
-	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-}
-
-void model_Init() {
-	model_program = glCreateProgram();
-
-	GLuint model_vertexShader = glCreateShader(GL_VERTEX_SHADER);
-	GLuint model_fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-
-	char** model_vertexShaderSource = loadShaderSource("toon.vs.glsl");
-	char** model_fragmentShaderSource = loadShaderSource("toon.fs.glsl");
-
-	glShaderSource(model_vertexShader, 1, model_vertexShaderSource, NULL);
-	glShaderSource(model_fragmentShader, 1, model_fragmentShaderSource, NULL);
-
-	freeShaderSource(model_vertexShaderSource);
-	freeShaderSource(model_fragmentShaderSource);
-
-	glCompileShader(model_vertexShader);
-	glCompileShader(model_fragmentShader);
-
-	shaderLog(model_vertexShader);
-	shaderLog(model_fragmentShader);
-
-	glAttachShader(model_program, model_vertexShader);
-	glAttachShader(model_program, model_fragmentShader);
-	glLinkProgram(model_program);
-	glUseProgram(model_program);
-
-	toon_Init();
-	//shadow_Init();
-	//SSAO_Init();
-}
-
-/*-----------------------------------------------Toon Shading and Model Part-----------------------------------------------*/
 
 
 /*-----------------------------------------------Skybox part-----------------------------------------------*/
@@ -2657,7 +2614,8 @@ void initScene() {
 
 	//loadScene();
 	objModel.loadModel("./eastern ancient casttle.obj");
-	objhuman.loadModel("./nanosuit.obj");
+	objPokemon.loadModel("./TextureModels/Digda.obj");
+	objCharmander.loadModel("./TextureModels/Hitokage.obj");
 }
 
 void renderScene() {
@@ -2684,13 +2642,22 @@ void renderScene() {
 }
 
 void renderModel() {
-	/*glUseProgram(scene_program);
+	glUseProgram(scene_program);
 
-	model_matrix = translate(mat4(1.0), vec3());
-	model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
-	model_matrix = scale(model_matrix, vec3(0.5f, 0.5f, 0.5f));*/
-	//glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(view * model_matrix));
-	//objhuman.Draw(scene_program);
+	//model_matrix = translate(mat4(1.0), vec3());
+	model_matrix = scale(model_matrix, vec3(15.0f, 15.0f, 15.0f));
+	glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(view * model_matrix));
+	objPokemon.Draw(scene_program);
+}
+
+
+void renderModel_Charmander() {
+	glUseProgram(scene_program);
+
+	//model_matrix = translate(mat4(1.0), vec3());
+	model_matrix = scale(model_matrix, vec3(15.0f, 15.0f, 15.0f));
+	glUniformMatrix4fv(um4mv, 1, GL_FALSE, value_ptr(view * model_matrix));
+	objCharmander.Draw(scene_program);
 }
 
 //-----------------End Load Scene Function and Variables------------------------
@@ -2760,10 +2727,10 @@ void init_post_framebuffer() {
 
 	glGenBuffers(1, &window_vertex_buffer);
 	glBindBuffer(GL_ARRAY_BUFFER, window_vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(window_vertex), window_vertex, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(window_vertex), window_vertex, 0x88E4);
 
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(GL_FLOAT) * 4, 0);
-	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(GL_FLOAT) * 4, (const GLvoid*)(sizeof(GL_FLOAT) * 2));
+	glVertexAttribPointer(0, 2, 0x1406, 0, sizeof(0x1406) * 4, 0);
+	glVertexAttribPointer(1, 2, 0x1406, 0, sizeof(0x1406) * 4, (const GLvoid*)(sizeof(0x1406) * 2));
 
 	glEnableVertexAttribArray(0);
 	glEnableVertexAttribArray(1);
@@ -2794,22 +2761,22 @@ void init_post_rbo() {
 	// Generate a texture for FBO
 	glGenTextures(1, &FBODataTexture);
 	// Bind it so that we can specify the format of the textrue
-	glBindTexture(GL_TEXTURE_2D, FBODataTexture);
+	glBindTexture(0x0DE1, FBODataTexture);
 
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, viewport_size.width, viewport_size.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexImage2D(0x0DE1, 0, 0x1908, viewport_size.width, viewport_size.height, 0, 0x1908, 0x1401, NULL);
+	glTexParameteri(0x0DE1, 0x2802, 0x812F);
+	glTexParameteri(0x0DE1, 0x2803, 0x812F);
+	glTexParameteri(0x0DE1, 0x2801, 0x2601);
+	glTexParameteri(0x0DE1, 0x2800, 0x2601);
 
 	//Bind the framebuffer with first parameter "GL_DRAW_FRAMEBUFFER" 
-	glBindFramebuffer(GL_FRAMEBUFFER, FBO);
+	glBindFramebuffer(0x8D40, FBO);
 
 	//Set depthrbo to current fbo
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthRBO);
+	glFramebufferRenderbuffer(0x8D40, 0x8D00, 0x8D41, depthRBO);
 
 	//Set buffertexture to current fbo
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, FBODataTexture, 0);
+	glFramebufferTexture2D(0x8D40, 0x8CE0, 0x0DE1, FBODataTexture, 0);
 }
 
 void post_render() {
@@ -2880,39 +2847,39 @@ void ssaoSetup()
 void ssao_reshape_setup() {
 	// Gen texture
 	glGenTextures(1, &mainColorTexture);
-	glBindTexture(GL_TEXTURE_2D, mainColorTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, viewport_size.width, viewport_size.height, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glBindTexture(0x0DE1, mainColorTexture);
+	glTexImage2D(0x0DE1, 0, 0x1907, viewport_size.width, viewport_size.height, 0, 0x1907, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MIN_FILTER, 0x2600);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MAG_FILTER, 0x2600);
 	glGenTextures(1, &mainDepthTexture);
-	glBindTexture(GL_TEXTURE_2D, mainDepthTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, viewport_size.width, viewport_size.height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glBindTexture(0x0DE1, mainDepthTexture);
+	glTexImage2D(0x0DE1, 0, GL_DEPTH_COMPONENT32F, viewport_size.width, viewport_size.height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MIN_FILTER, 0x2600);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MAG_FILTER, 0x2600);
+	glTexParameteri(0x0DE1, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(0x0DE1, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	glGenTextures(1, &mainNormalTexture);
-	glBindTexture(GL_TEXTURE_2D, mainNormalTexture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, viewport_size.width, viewport_size.height, 0, GL_RGB, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glBindTexture(0x0DE1, mainNormalTexture);
+	glTexImage2D(0x0DE1, 0, GL_RGB16F, viewport_size.width, viewport_size.height, 0, 0x1907, GL_FLOAT, NULL);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MIN_FILTER, 0x2600);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MAG_FILTER, 0x2600);
 	glGenTextures(1, &viewSpacePosTex);
-	glBindTexture(GL_TEXTURE_2D, viewSpacePosTex);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, viewport_size.width, viewport_size.height, 0, GL_RGB, GL_FLOAT, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glBindTexture(0x0DE1, viewSpacePosTex);
+	glTexImage2D(0x0DE1, 0, GL_RGB16F, viewport_size.width, viewport_size.height, 0, 0x1907, GL_FLOAT, NULL);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MIN_FILTER, 0x2600);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MAG_FILTER, 0x2600);
 	// Attach to FBO
-	glBindFramebuffer(GL_FRAMEBUFFER, mainFBO);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mainColorTexture, 0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, mainNormalTexture, 0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, viewSpacePosTex, 0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, mainDepthTexture, 0);
+	glBindFramebuffer(0x8D40, mainFBO);
+	glFramebufferTexture2D(0x8D40, GL_COLOR_ATTACHMENT0, 0x0DE1, mainColorTexture, 0);
+	glFramebufferTexture2D(0x8D40, GL_COLOR_ATTACHMENT1, 0x0DE1, mainNormalTexture, 0);
+	glFramebufferTexture2D(0x8D40, GL_COLOR_ATTACHMENT2, 0x0DE1, viewSpacePosTex, 0);
+	glFramebufferTexture2D(0x8D40, GL_DEPTH_ATTACHMENT, 0x0DE1, mainDepthTexture, 0);
 	GLuint attachments[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 , GL_COLOR_ATTACHMENT2 };
 	glDrawBuffers(3, attachments);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindFramebuffer(0x8D40, 0);
 	// Noise map
 	glGenTextures(1, &noise_map);
-	glBindTexture(GL_TEXTURE_2D, noise_map);
+	glBindTexture(0x0DE1, noise_map);
 	vec3 noiseData[16];
 	for (int i = 0; i < 16; ++i)
 	{
@@ -2922,11 +2889,11 @@ void ssao_reshape_setup() {
 			0.0f
 		));
 	}
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, 4, 4, 0, GL_RGB, GL_FLOAT, &noiseData[0][0]);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexImage2D(0x0DE1, 0, GL_RGB8, 4, 4, 0, 0x1907, GL_FLOAT, &noiseData[0][0]);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MAG_FILTER, 0x2600);
+	glTexParameteri(0x0DE1, GL_TEXTURE_MIN_FILTER, 0x2600);
+	glTexParameteri(0x0DE1, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(0x0DE1, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	// Kernal UBO
 	glGenBuffers(1, &kernal_ubo);
 	glBindBuffer(GL_UNIFORM_BUFFER, kernal_ubo);
@@ -2950,19 +2917,19 @@ void ssao_reshape_setup() {
 }
 
 void ssao_render() {
-	//glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	//glBindFramebuffer(0x8D40, 0);
 	//glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glUseProgram(ssaoProgram);
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, mainColorTexture);
+	glBindTexture(0x0DE1, mainColorTexture);
 	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, mainNormalTexture);
+	glBindTexture(0x0DE1, mainNormalTexture);
 	glActiveTexture(GL_TEXTURE2);
-	glBindTexture(GL_TEXTURE_2D, mainDepthTexture);
+	glBindTexture(0x0DE1, mainDepthTexture);
 	glActiveTexture(GL_TEXTURE3);
-	glBindTexture(GL_TEXTURE_2D, noise_map);
+	glBindTexture(0x0DE1, noise_map);
 	glActiveTexture(GL_TEXTURE4);
-	glBindTexture(GL_TEXTURE_2D, viewSpacePosTex);
+	glBindTexture(0x0DE1, viewSpacePosTex);
 	glUniformMatrix4fv(glGetUniformLocation(ssaoProgram, "proj"), 1, GL_FALSE, &projection[0][0]);
 	glUniform2f(glGetUniformLocation(ssaoProgram, "noise_scale"), viewport_size.width / 4.0f, viewport_size.height / 4.0f);
 	glUniform1i(glGetUniformLocation(ssaoProgram, "color_map"), 0);
@@ -3002,7 +2969,7 @@ void render_running_man() {
 		glBindVertexArray(characterShapes[i].vao);
 		glBindBuffer(GL_ARRAY_BUFFER, characterShapes[i].vbo);
 		glBufferSubData(GL_ARRAY_BUFFER, 0, new_shapes[i].mesh.positions.size() * sizeof(float), new_shapes[i].mesh.positions.data());
-		glBindTexture(GL_TEXTURE_2D, characterMaterials[characterShapes[i].materialId].texId);
+		glBindTexture(0x0DE1, characterMaterials[characterShapes[i].materialId].texId);
 		running_man_model = translate(mat4(1.0), vec3());
 		running_man_model = translate(running_man_model, vec3(running_man_x, running_man_y, running_man_z));
 		running_man_model = scale(running_man_model, vec3(0.5f, 0.5f, 0.5f));
@@ -3743,7 +3710,6 @@ void sound_init()
 
 
 
-
 void My_Init()
 {
 	glClearColor(0.0f, 0.6f, 0.0f, 1.0f);
@@ -3773,7 +3739,6 @@ void My_Init()
 
 	initScene();
 	skyboxInitFunction();
-	model_Init();
 
 	shadow_Init();
 
@@ -3797,8 +3762,8 @@ void My_Display()
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	view = lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
 
-	cout <<  "Camera Positon : " << cameraPos.x << ", " << cameraPos.y << ", " << cameraPos.z << endl;
-	cout << "Camera Front : " << cameraFront.x << ", " << cameraFront.y << ", " << cameraFront.z << endl;
+	//cout <<  "Camera Positon : " << cameraPos.x << ", " << cameraPos.y << ", " << cameraPos.z << endl;
+	//cout << "Camera Front : " << cameraFront.x << ", " << cameraFront.y << ", " << cameraFront.z << endl;
 	
 	//======================= Begin Shadow Depth Pas=================================
 	glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
@@ -3807,16 +3772,15 @@ void My_Display()
 	glUseProgram(depth_program);
 
 	glUniformMatrix4fv(lightSpaceMatrixLocation, 1, GL_FALSE, value_ptr(lightSpace));
-	glUniformMatrix4fv(modelLocation, 1, GL_FALSE, value_ptr(mat4(1.0f)));
+	glUniformMatrix4fv(glGetUniformLocation(depth_program, "model"), 1, GL_FALSE, value_ptr(mat4(1.0f)));
 	glCullFace(GL_FRONT);
 	objModel.Draw(depth_program);
 
-	//glUseProgram(depth_program);
-	//model_matrix = translate(mat4(1.0), vec3());
-	//model_matrix = translate(model_matrix, vec3(0.0f, 0.0f, 0.0f));
-	//model_matrix = scale(model_matrix, vec3(5.0f, 5.0f, 5.0f));
-	//glUniformMatrix4fv(modelLocation, 1, GL_FALSE, value_ptr(model_matrix));
-	//objhuman.Draw(depth_program);
+	glUseProgram(depth_program);
+	model_matrix = translate(mat4(1.0f), vec3(-17.9465f, 105.38f, -300.96f));
+	model_matrix = scale(model_matrix, vec3(15.0f, 15.0f, 15.0f));
+	glUniformMatrix4fv(glGetUniformLocation(depth_program, "model"), 1, GL_FALSE, value_ptr(model_matrix));
+	objPokemon.Draw(depth_program);
 
 	glCullFace(GL_BACK);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -3836,6 +3800,18 @@ void My_Display()
 	SkyboxRendering();
 
 	if (running_man == 1) render_running_man();
+
+	model_matrix = translate(mat4(1.0f), vec3(-17.9465f, 105.38f, -300.96f));
+	renderModel_Charmander();
+	
+	model_matrix = translate(mat4(1.0f), vec3(124.226f, 36.6612f, 115.176f));
+	renderModel();
+	
+	model_matrix = translate(mat4(1.0f), vec3(-158.195f, 24.3042f, 274.157f));
+	renderModel();
+
+	model_matrix = translate(mat4(1.0f), vec3(51.7317f, 23.0702f, 475.35f));
+	renderModel();
 
 	renderScene();
 
@@ -3981,8 +3957,6 @@ void My_Keyboard(unsigned char key, int x, int y)
 		SoundEngine->stopAllSounds();
 		sound_init();
 	}
-
-	
 }
 
 void My_SpecialKeys(int key, int x, int y)
@@ -3997,11 +3971,11 @@ void My_SpecialKeys(int key, int x, int y)
 		break;
 	case GLUT_KEY_LEFT:
 		printf("Left arrow is pressed at (%d, %d)\n", x, y);
-		running_man_x -= 2.0f;
+		running_man_x += 2.0f;
 		break;
 	case GLUT_KEY_RIGHT:
 		printf("Right arrow is pressed at (%d, %d)\n", x, y);
-		running_man_x += 2.0f;
+		running_man_x -= 2.0f;
 		break;
 	case GLUT_KEY_UP:
 		printf("Up arrow is pressed at (%d, %d)\n", x, y);
@@ -4021,16 +3995,6 @@ void My_Menu(int id)
 {
 	switch (id)
 	{
-	case MENU_TIMER_START:
-		if (!timer_enabled)
-		{
-			timer_enabled = true;
-			glutTimerFunc(timer_speed, My_Timer, 0);
-		}
-		break;
-	case MENU_TIMER_STOP:
-		timer_enabled = false;
-		break;
 	case MENU_EXIT:
 		exit(0);
 		break;
@@ -4059,6 +4023,7 @@ void My_Menu(int id)
 		break;
 	case '7':
 		fogEffect = !fogEffect;
+		enable_fog = !enable_fog;
 		break;
 	case '8':
 		lightEffect = !lightEffect;
@@ -4077,8 +4042,8 @@ void My_Menu(int id)
 int main(int argc, char *argv[])
 {
 #ifdef __APPLE__
-    // Change working directory to source code path
-    chdir(__FILEPATH__("/../Assets/"));
+	// Change working directory to source code path
+	chdir(__FILEPATH__("/../Assets/"));
 #endif
 	// Initialize GLUT and GLEW, then create a window.
 	////////////////////
@@ -4086,11 +4051,11 @@ int main(int argc, char *argv[])
 #ifdef _MSC_VER
 	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
 #else
-    glutInitDisplayMode(GLUT_3_2_CORE_PROFILE | GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
+	glutInitDisplayMode(GLUT_3_2_CORE_PROFILE | GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
 #endif
 	glutInitWindowPosition(100, 100);
 	glutInitWindowSize(1066, 600);
-	glutCreateWindow("Final Project Team 8"); // You cannot use OpenGL functions before this line; The OpenGL context must be created first by glutCreateWindow()!
+	glutCreateWindow("Final Project Team 8 - Dream Island"); // You cannot use OpenGL functions before this line; The OpenGL context must be created first by glutCreateWindow()!
 #ifdef _MSC_VER
 	glewInit();
 #endif
@@ -4103,11 +4068,9 @@ int main(int argc, char *argv[])
 
 	// Create a menu and bind it to mouse right button.
 	int menu_main = glutCreateMenu(My_Menu);
-	int menu_timer = glutCreateMenu(My_Menu);
 	int menu_particle = glutCreateMenu(My_Menu);;
 
 	glutSetMenu(menu_main);
-	glutAddSubMenu("Timer", menu_timer);
 	glutAddMenuEntry("Image Abstraction", '0');
 	glutAddMenuEntry("Water Color", '1');
 	glutAddMenuEntry("Magnifier", '2');
@@ -4117,13 +4080,9 @@ int main(int argc, char *argv[])
 	glutAddMenuEntry("SSAO", '6');
 	glutAddMenuEntry("Fog Effect", '7');
 	glutAddMenuEntry("Light Effect", '8');
-	glutAddMenuEntry("ShadowMap Effect", '9');
+	glutAddMenuEntry("Shadow Map Effect", '9');
 	glutAddMenuEntry("Normal Map Effect", '10');
 	glutAddMenuEntry("Exit", MENU_EXIT);
-
-	glutSetMenu(menu_timer);
-	glutAddMenuEntry("Start", MENU_TIMER_START);
-	glutAddMenuEntry("Stop", MENU_TIMER_STOP);
 
 	glutSetMenu(menu_main);
 	glutAttachMenu(GLUT_RIGHT_BUTTON);
