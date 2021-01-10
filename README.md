@@ -7,7 +7,7 @@
 - [ ]  ~~Toon shading 5~~ (放棄)
 - [X]  Framebuffer 5
 - [X]  Environment mapping 5
-- [ ]  Normal mapping 5
+- [X]  Normal mapping 5
 - [X]  Terrain 10
 - [X]  FBX Animation 10
 - [X]  SSAO 10
